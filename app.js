@@ -5,59 +5,73 @@ import {
 } from "./ai.js";
 import { APP_VERSION, setupPWA, promptInstall, applyUpdate, isStandalone, getRemoteVersion, checkForUpdate } from "./pwa.js";
 import { taiwanize, looksLikeRefusal, CHAT_SYSTEM_PROMPT } from "./modules/i18n.js";
-import { addTask, listTasks, toggleTask, deleteTask, writeOPFSDemo, readOPFSDemo } from "./modules/db.js";
-import { planToolCall } from "./modules/agent.js";
-import { loadWhisper, startRecording, stopAndTranscribe } from "./modules/voice.js";
-import { startCamera, stopCamera, analyzeVision, captureCamera } from "./modules/vision.js";
-import { loadVLM, analyzeImage } from "./modules/vlm.js";
-import { loadImageToCanvas, grayscaleCanvas, exportCanvas, playAudioFile, loadVideo, captureVideoFrame } from "./modules/media.js";
-import { createPeerOffer, applyRemoteDescription, sendPeerMessage } from "./modules/p2p.js";
-import { startWebGLDemo } from "./modules/gpu.js";
-import { runLLMBenchmark } from "./modules/benchmark.js";
+import {
+  addTask, listTasks, toggleTask, deleteTask, completeTaskByQuery, deleteTaskByQuery,
+  addAgentRun, listAgentRuns, clearAgentRuns
+} from "./modules/db.js";
+import { nextAgentAction, isFinishAction } from "./modules/agent.js";
+import { loadWhisper, startRecording, stopAndTranscribe, isWhisperReady } from "./modules/voice.js";
+import { startCamera, stopCamera, analyzeVision, captureCamera, preloadVision, getVisionStatus } from "./modules/vision.js";
+import { loadVLM, analyzeImage, isVLMReady } from "./modules/vlm.js";
+import { loadImageToCanvas, grayscaleCanvas, loadVideo, captureVideoFrame } from "./modules/media.js";
 import { runOfflineChecks } from "./modules/offline.js";
 
-const $=id=>document.getElementById(id);
-const els={}; document.querySelectorAll("[id]").forEach(el=>els[el.id]=el);
+const els={};
+document.querySelectorAll("[id]").forEach(el=>els[el.id]=el);
 
-const history=[{role:"system",content:CHAT_SYSTEM_PROMPT}];
-let updateRegistration=null,reloadingForUpdate=false,modelInventory=null,lastVisionBlob=null;
-let audioPlayback=null;
+let updateRegistration=null;
+let reloadingForUpdate=false;
+let modelInventory=null;
+let attachedImage=null;
+let attachedVideo=null;
+let videoObjectUrl=null;
+let cameraActive=false;
+let voiceRecording=false;
+let agentRunning=false;
+let currentSteps=[];
 
-const FEATURES=[
-"1. PWA 安裝／離線","2. WebGPU 裝置檢測","3. 模型管理中心","4. Qwen 本機聊天",
-"5. Qwen Tool Calling","6. 待辦／資料操作","7. Whisper 語音","8. 相機",
-"9. Face","10. Hand","11. Gesture","12. Pose","13. SmolVLM 圖片理解",
-"14. Canvas 圖片處理","15. WebAudio","16. 影片抽 Frame","17. OPFS／IndexedDB",
-"18. P2P","19. 3D / GPU Demo","20. Benchmark","21. 完全離線測試"
-];
-
-function stat(label,value,cls=""){return `<div class="stat"><dt>${label}</dt><dd class="${cls}">${value}</dd></div>`;}
-function setProgress(v,text){const p=Math.max(0,Math.min(100,Math.round((v??0)*100)));els.progressBar.style.width=`${p}%`;els.progressPct.textContent=`${p}%`;if(text)els.progressText.textContent=text;}
-function addMessage(role,text=""){const n=document.createElement("div");n.className=`message ${role}`;n.textContent=text;els.messages.append(n);els.messages.scrollTop=els.messages.scrollHeight;return n;}
+function escapeHTML(value){
+  return String(value??"").replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
+}
+function stat(label,value,cls=""){
+  return `<div class="stat"><dt>${escapeHTML(label)}</dt><dd class="${cls}">${escapeHTML(value)}</dd></div>`;
+}
 function showPage(name){
-  document.querySelectorAll(".page").forEach(x=>x.classList.toggle("active",x.dataset.pagePanel===name));
-  document.querySelectorAll("#tabs button").forEach(x=>x.classList.toggle("active",x.dataset.page===name));
+  document.querySelectorAll(".page").forEach(p=>p.classList.toggle("active",p.dataset.pagePanel===name));
+  document.querySelectorAll("#mainNav button").forEach(b=>b.classList.toggle("active",b.dataset.page===name));
   window.scrollTo({top:0,behavior:"smooth"});
 }
-function renderFeatureGrid(){
-  els.featureGrid.innerHTML=FEATURES.map((x,i)=>{
-    const state=i<6?"底座已架":i<13?"可按需測試":i<20?"實驗入口已架":"待離線實測";
-    return `<div class="feature-item"><b>${x}</b><span>${state}</span></div>`;
-  }).join("");
+function setModelProgress(v,text){
+  const p=Math.max(0,Math.min(100,Math.round((v??0)*100)));
+  els.modelProgressBar.style.width=`${p}%`;
+  els.modelProgressPct.textContent=`${p}%`;
+  if(text)els.modelProgressText.textContent=text;
+}
+function setAgentStatus(text,kind=""){
+  els.agentRunStatus.textContent=text;
+  els.agentRunStatus.className=`model-note ${kind}`;
+}
+function updateAttachmentStatus(){
+  const parts=[];
+  if(attachedImage)parts.push(`圖片：${attachedImage.name||"相機照片"}`);
+  if(attachedVideo)parts.push(`影片：${attachedVideo.name||"已附加"}`);
+  if(cameraActive)parts.push("相機：已開啟");
+  els.attachmentStatus.textContent=parts.length?parts.join("｜"):"沒有附件";
+  els.clearAttachmentBtn.classList.toggle("hidden",parts.length===0);
 }
 
-function configureEngineUI(){
-  if(preferredBackend()==="webgpu"){
-    els.modeBadge.textContent="WebGPU 高速模式";
-    els.engineDescription.textContent="WebGPU + WebLLM；Qwen 約 290MB，模型存在手機瀏覽器快取。";
-    els.loadModelBtn.textContent=isModelInstalled()?"從本機啟動 AI":"下載／啟動 AI（約 290MB）";
-    els.progressText.textContent=isModelInstalled()?"模型已在手機裡，目前尚未載入 RAM。":"尚未下載 GPU 模型";
-  }else{
-    els.modeBadge.textContent="CPU 相容模式";
-    els.engineDescription.textContent="沒有 WebGPU 時改用 CPU/WASM；完全本機但較慢。";
-    els.loadModelBtn.textContent=isModelInstalled()?"從本機啟動 AI":"下載 CPU 版 AI（約 520MB）";
-    els.progressText.textContent=isModelInstalled()?"模型已在手機裡，待載入 RAM。":"首次下載約 520MB";
-  }
+async function renderHealth(){
+  const vision=getVisionStatus();
+  const visionReady=Object.values(vision).every(Boolean);
+  const skillCount=Number(isWhisperReady())+Number(visionReady)+Number(isVLMReady());
+  els.qwenHealth.textContent=`🧠 Qwen：${isModelReady()?"運行中":isModelInstalled()?"已下載":"未下載"}`;
+  els.skillHealth.textContent=`🧩 技能包：${skillCount}/3 已載入`;
+  els.gpuHealth.textContent=`⚡ WebGPU：${navigator.gpu?"支援":"不支援"}`;
+  els.agentBadge.textContent=isModelReady()?"Agent 可工作":"Agent 尚未啟動";
+  els.agentBadge.className=`badge ${isModelReady()?"ok":""}`;
+  els.agentHealthText.textContent=isModelReady()
+    ?"Qwen 已在本機 RAM，可開始測試工具選擇、多步任務與失敗重試。"
+    :"先到「模型」載入 Qwen；技能包可由 Agent 在需要時自動載入。";
 }
 
 async function renderDeviceStats(){
@@ -66,139 +80,474 @@ async function renderDeviceStats(){
   const quota=e?.quota?`${(e.quota/1073741824).toFixed(1)} GB`:"未知";
   els.deviceStats.innerHTML=[
     stat("WebGPU",navigator.gpu?"支援":"不支援",navigator.gpu?"ok":"warn"),
-    stat("CPU/WASM 備援","支援","ok"),stat("PWA 模式",isStandalone()?"已安裝":"瀏覽器",isStandalone()?"ok":"warn"),
-    stat("CPU 執行緒",navigator.hardwareConcurrency??"未知"),stat("網站已用空間",used),stat("網站可用額度",quota)
+    stat("PWA 模式",isStandalone()?"已安裝":"瀏覽器",isStandalone()?"ok":"warn"),
+    stat("Service Worker",navigator.serviceWorker?.controller?"已接管":"尚未接管",navigator.serviceWorker?.controller?"ok":"warn"),
+    stat("CPU 執行緒",navigator.hardwareConcurrency??"未知"),
+    stat("網站已用空間",used),
+    stat("網站可用額度",quota)
   ].join("");
 }
 
-function renderAIStats(){
-  const p=getModelProfile(),installed=isModelInstalled(),ready=isModelReady(),stored=getStoredBackend();
+function renderQwenStats(){
+  const p=getModelProfile(),stored=getStoredBackend();
   const rows=[
-    stat("模型","Qwen2.5 0.5B"),stat("本機安裝",installed?"已下載到手機":"尚未下載",installed?"ok":"warn"),
-    stat("儲存位置",installed?getStorageLocation():"—"),stat("目前模型容量",p.download),
-    stat("下載時引擎",stored==="wasm"?"CPU/WASM":stored==="webgpu"?"WebGPU":"尚未"),
-    stat("目前引擎",p.mode,ready?"ok":""),stat("執行狀態",ready?"已載入 RAM，可聊天":installed?"已下載，待啟動":"未啟動",ready?"ok":"warn"),
-    stat("量化",p.quant)
+    stat("本機安裝",isModelInstalled()?"已下載":"尚未下載",isModelInstalled()?"ok":"warn"),
+    stat("執行狀態",isModelReady()?"已載入 RAM":"未載入",isModelReady()?"ok":"warn"),
+    stat("目前引擎",p.mode),
+    stat("量化",p.quant),
+    stat("目前模型容量",p.download),
+    stat("儲存位置",isModelInstalled()?getStorageLocation():"—"),
+    stat("上次下載引擎",stored==="webgpu"?"WebGPU":stored==="wasm"?"CPU/WASM":"尚未")
   ];
   if(modelInventory){
-    const cpu=modelInventory.cpu.installed?"已安裝":modelInventory.cpu.partial?"部分殘留":"未發現";
-    const gpu=modelInventory.gpu.installed?"已安裝":modelInventory.gpu.partial?"部分殘留":"未發現";
-    rows.push(stat("GPU Q4F16 版",gpu,modelInventory.gpu.installed?"ok":modelInventory.gpu.partial?"warn":""));
-    rows.push(stat("CPU/WASM Q8 版",cpu,(modelInventory.cpu.installed||modelInventory.cpu.partial)?"warn":""));
-    rows.push(stat("完整模型版本",`${modelInventory.packageCount} 套`,modelInventory.packageCount>1?"warn":"ok"));
-    rows.push(stat("精確重複檔",modelInventory.exactDuplicateUrls.length?`${modelInventory.exactDuplicateUrls.length} 個`:"未發現",modelInventory.exactDuplicateUrls.length?"danger":"ok"));
+    rows.push(
+      stat("GPU Q4F16",modelInventory.gpu.installed?"已安裝":modelInventory.gpu.partial?"部分殘留":"未發現",modelInventory.gpu.installed?"ok":modelInventory.gpu.partial?"warn":""),
+      stat("CPU/WASM Q8",modelInventory.cpu.installed?"已安裝":modelInventory.cpu.partial?"部分殘留":"未發現",(modelInventory.cpu.installed||modelInventory.cpu.partial)?"warn":""),
+      stat("精確重複檔",modelInventory.exactDuplicateUrls.length?`${modelInventory.exactDuplicateUrls.length} 個`:"未發現",modelInventory.exactDuplicateUrls.length?"danger":"ok")
+    );
   }
-  els.aiStats.innerHTML=rows.join("");
+  els.qwenStats.innerHTML=rows.join("");
+  els.loadQwenBtn.textContent=isModelReady()?"Qwen 已啟動":isModelInstalled()?"從本機啟動 Qwen":preferredBackend()==="webgpu"?"下載／啟動 Qwen（約290MB）":"下載 CPU 版 Qwen";
+  els.loadQwenBtn.disabled=isModelReady();
+  els.unloadQwenBtn.disabled=!isModelReady();
 }
 
 async function refreshModelInventory(){
-  els.modelScanBtn.disabled=true;els.modelScanBtn.textContent="掃描中…";
+  els.scanModelsBtn.disabled=true;
+  els.scanModelsBtn.textContent="掃描中…";
   try{
-    modelInventory=await scanModelInventory();renderAIStats();
+    modelInventory=await scanModelInventory();
     const hasCpu=modelInventory.cpu.installed||modelInventory.cpu.partial;
     els.cleanupCpuBtn.classList.toggle("hidden",!hasCpu||!navigator.gpu);
-    if(modelInventory.exactDuplicateUrls.length) els.modelScanNote.textContent=`發現 ${modelInventory.exactDuplicateUrls.length} 個完全相同的重複快取檔。`;
-    else if(modelInventory.gpu.installed&&hasCpu) els.modelScanNote.textContent=modelInventory.cpu.installed?"GPU 與 CPU/WASM 兩套格式並存；不會打架，可清理 CPU 版。":"GPU 完整；另有 CPU/WASM 部分殘留，可清理。";
-    else els.modelScanNote.textContent="目前沒有偵測到模型衝突或重複檔。";
+    if(modelInventory.exactDuplicateUrls.length){
+      els.modelScanNote.textContent=`發現 ${modelInventory.exactDuplicateUrls.length} 個完全相同的重複快取檔。`;
+    }else if(modelInventory.gpu.installed&&hasCpu){
+      els.modelScanNote.textContent=modelInventory.cpu.installed?"GPU 與 CPU/WASM 兩套格式並存；不會打架，可清理 CPU 版。":"GPU 完整；另有 CPU/WASM 部分殘留，可清理。";
+    }else{
+      els.modelScanNote.textContent="未發現模型衝突或精確重複檔。";
+    }
+    renderQwenStats();
   }catch(e){els.modelScanNote.textContent=`掃描失敗：${e.message||e}`;}
-  finally{els.modelScanBtn.disabled=false;els.modelScanBtn.textContent="重新掃描本機模型";}
+  finally{els.scanModelsBtn.disabled=false;els.scanModelsBtn.textContent="重新掃描本機模型";}
 }
 
-async function startModel(){
-  els.loadModelBtn.disabled=true;els.modeBadge.textContent="AI 啟動中";
-  setProgress(.01,preferredBackend()==="webgpu"?"準備 WebLLM…":"準備 CPU/WASM…");
+async function startQwen(){
+  els.loadQwenBtn.disabled=true;
+  setModelProgress(.01,preferredBackend()==="webgpu"?"準備 WebLLM…":"準備 CPU/WASM…");
   try{
-    await loadModel(r=>setProgress(r.progress??0,r.text||"下載／載入模型…"));
-    setProgress(1,"AI 已就緒｜模型已載入 RAM");
-    els.modeBadge.textContent=getBackendMode()==="webgpu"?"WebGPU AI 已啟動":"CPU/WASM AI 已啟動";
-    els.modeBadge.classList.add("ok");els.chatInput.disabled=false;els.sendBtn.disabled=false;els.unloadBtn.disabled=false;els.loadModelBtn.textContent="AI 已啟動";
-    await refreshModelInventory();await renderDeviceStats();
-  }catch(e){els.loadModelBtn.disabled=false;els.modeBadge.textContent="啟動失敗";setProgress(0,e.message||String(e));}
-}
-
-async function getSafeReply(userText){
-  const first=await chat(history,()=>{});
-  let result=first;
-  if(looksLikeRefusal(first.output)){
-    result=await chat([
-      {role:"system",content:CHAT_SYSTEM_PROMPT+"\n上一輪可能誤判。請重新理解使用者原句；若是一般知識問題直接回答。"},
-      {role:"user",content:userText}
-    ],()=>{},{max_tokens:240,temperature:.45});
+    await loadModel(r=>setModelProgress(r.progress??0,r.text||"下載／載入模型…"));
+    setModelProgress(1,"Qwen 已載入 RAM");
+    await refreshModelInventory();
+    await renderHealth();
+    renderQwenStats();
+    setAgentStatus("Agent 已可工作。","ok");
+  }catch(e){
+    els.loadQwenBtn.disabled=false;
+    setModelProgress(0,e.message||String(e));
   }
-  result.output=await taiwanize(result.output);
-  return result;
 }
 
-async function sendChat(e){
-  e.preventDefault();const text=els.chatInput.value.trim();if(!text||!isModelReady())return;
-  els.chatInput.value="";addMessage("user",text);history.push({role:"user",content:text});
-  const reply=addMessage("assistant","生成中…");els.sendBtn.disabled=true;
-  try{
-    const result=await getSafeReply(text);reply.textContent=result.output;history.push({role:"assistant",content:result.output});
-    const first=result.firstTokenMs?`首字 ${result.firstTokenMs}ms｜`:"";
-    els.perfText.textContent=`${first}總耗時 ${result.totalMs}ms｜${result.runtime||getModelProfile().mode}`;
-  }catch(err){reply.textContent=`錯誤：${err.message||err}`;}finally{els.sendBtn.disabled=false;}
+async function prepareWhisper(){
+  if(isWhisperReady())return true;
+  els.skillPackStatus.textContent="載入 Whisper Tiny…";
+  await loadWhisper(r=>{els.skillPackStatus.textContent=r?.file||r?.status||"Whisper 下載中…";});
+  els.skillPackStatus.textContent="Whisper Tiny 已就緒";
+  await renderHealth();
+  return true;
+}
+async function prepareMediaPipe(){
+  const types=["face","hand","gesture","pose"];
+  for(const type of types){
+    els.skillPackStatus.textContent=`載入 MediaPipe ${type}…`;
+    await preloadVision(type);
+  }
+  els.skillPackStatus.textContent="MediaPipe Face / Hand / Gesture / Pose 已就緒";
+  await renderHealth();
+}
+async function prepareVLM(){
+  if(isVLMReady())return true;
+  els.skillPackStatus.textContent="載入 SmolVLM 256M…";
+  await loadVLM(s=>els.skillPackStatus.textContent=s);
+  els.skillPackStatus.textContent="SmolVLM 256M 已就緒";
+  await renderHealth();
+  return true;
 }
 
 async function renderTasks(){
   const tasks=await listTasks();
-  els.taskList.innerHTML=tasks.length?tasks.map(t=>`<div class="task ${t.done?"done":""}" data-id="${t.id}"><input type="checkbox" ${t.done?"checked":""}><span class="task-title">${escapeHTML(t.title)}</span><button class="ghost task-delete">刪除</button></div>`).join(""):'<p class="muted">目前沒有待辦。</p>';
-}
-function escapeHTML(s){return String(s).replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));}
-
-async function executeAgent(){
-  if(!isModelReady()) throw new Error("請先啟動 Qwen");
-  const input=els.agentInput.value.trim();if(!input)return;
-  els.agentResult.textContent="AI 判斷中…";
-  const plan=await planToolCall(chat,input);
-  let result="未執行工具";
-  if(plan.tool==="task.create"){await addTask(plan.args?.title||input);await renderTasks();result="已新增待辦";}
-  else if(plan.tool==="task.complete"){
-    const tasks=await listTasks(),q=plan.args?.title||"";const found=tasks.find(t=>!t.done&&t.title.includes(q));
-    if(found){await toggleTask(found.id);await renderTasks();result=`已完成：${found.title}`;}else result="找不到符合的未完成待辦";
-  }else if(plan.tool==="page.open"){showPage(plan.args?.target||"home");result=`已切換到 ${plan.args?.target||"home"}`;}
-  else if(plan.tool==="camera.open"){showPage("vision");await startCamera(els.cameraVideo);result="已開啟相機";}
-  els.agentResult.textContent=JSON.stringify({plan,result},null,2);
+  els.taskCount.textContent=String(tasks.filter(t=>!t.done).length);
+  els.taskList.innerHTML=tasks.length?tasks.map(t=>`
+    <div class="task ${t.done?"done":""}" data-id="${t.id}">
+      <input type="checkbox" ${t.done?"checked":""}>
+      <span class="task-title">${escapeHTML(t.title)}</span>
+      <button class="ghost task-delete">刪除</button>
+    </div>`).join(""):'<p class="muted">目前沒有待辦。讓 Agent 幫你建立一個。</p>';
 }
 
-async function visionAnalyze(type){
-  els.visionResult.textContent=`${type} 模型載入／分析中…`;
-  try{const r=await analyzeVision(type,els.cameraVideo);els.visionResult.textContent=JSON.stringify(r,null,2);}catch(e){els.visionResult.textContent=`錯誤：${e.message||e}`;}
+function renderLiveTrace(steps){
+  els.agentStepBadge.textContent=`${steps.length} step`;
+  els.liveTrace.innerHTML=steps.length?steps.map((s,i)=>`
+    <div class="trace-step">
+      <b>Step ${i+1} <span class="trace-tool">${escapeHTML(s.tool)}</span></b>
+      <div>${escapeHTML(s.reason||"")}</div>
+      <pre class="${s.error?"trace-error":""}">${escapeHTML(JSON.stringify(s.result,null,2))}</pre>
+    </div>`).join(""):'<p class="muted">尚無工具步驟。</p>';
 }
 
-async function vlmAnalyze(){
-  const blob=lastVisionBlob||els.visionFile.files?.[0];if(!blob){els.vlmResult.textContent="請先拍照或選圖片";return;}
-  els.vlmResult.textContent="SmolVLM 分析中…";
+async function renderRunLogs(){
+  const runs=await listAgentRuns(50);
+  els.runLogs.innerHTML=runs.length?runs.map(run=>{
+    const date=new Date(run.createdAt).toLocaleString("zh-TW");
+    const steps=(run.steps||[]).map((s,i)=>`<div class="run-step">Step ${i+1}｜<code>${escapeHTML(s.tool)}</code><br>${escapeHTML(s.reason||"")}<br>${escapeHTML(JSON.stringify(s.result))}</div>`).join("");
+    return `<details class="run-log">
+      <summary><div class="run-goal">${escapeHTML(run.goal)}</div><div class="run-meta">${date}｜${run.steps?.length||0} steps｜${run.success?"完成":"未完成"}</div></summary>
+      <div class="run-body"><div class="run-answer">${escapeHTML(run.answer||"")}</div>${steps}</div>
+    </details>`;
+  }).join(""):'<p class="muted">還沒有 Agent 執行紀錄。</p>';
+}
+
+async function ensureCamera(){
+  if(cameraActive)return;
+  await startCamera(els.agentCameraVideo);
+  cameraActive=true;
+  els.agentCameraVideo.classList.remove("hidden");
+  els.agentCameraBtn.textContent="關相機";
+  updateAttachmentStatus();
+}
+function closeCamera(){
+  stopCamera(els.agentCameraVideo);
+  cameraActive=false;
+  els.agentCameraVideo.classList.add("hidden");
+  els.agentCameraBtn.textContent="開相機";
+  updateAttachmentStatus();
+}
+async function captureImage(){
+  await ensureCamera();
+  attachedImage=await captureCamera(els.agentCameraVideo,els.agentCanvas);
+  attachedImage.name="相機照片";
+  els.agentCanvas.classList.remove("hidden");
+  updateAttachmentStatus();
+  return {image:"captured",width:els.agentCanvas.width,height:els.agentCanvas.height};
+}
+
+async function translateVisionQuestion(text){
+  if(!isModelReady())return "Describe the image briefly.";
+  const r=await chat([
+    {role:"system",content:"Translate the user's visual question into short English only. Do not answer it."},
+    {role:"user",content:text||"描述圖片"}
+  ],()=>{},{max_tokens:60,temperature:.05});
+  return r.output||"Describe the image briefly.";
+}
+
+async function ensureVideoReady(){
+  if(!attachedVideo)throw new Error("沒有附加影片");
+  if(videoObjectUrl)URL.revokeObjectURL(videoObjectUrl);
+  videoObjectUrl=loadVideo(attachedVideo,els.agentVideoPreview);
+  els.agentVideoPreview.classList.remove("hidden");
+  if(els.agentVideoPreview.readyState>=1)return;
+  await new Promise((resolve,reject)=>{
+    els.agentVideoPreview.onloadedmetadata=()=>resolve();
+    els.agentVideoPreview.onerror=()=>reject(new Error("影片讀取失敗"));
+  });
+}
+async function seekVideo(time){
+  await ensureVideoReady();
+  const video=els.agentVideoPreview;
+  const target=Math.max(0,Math.min(Number(time)||0,Math.max(0,(video.duration||0)-.05)));
+  if(Math.abs(video.currentTime-target)<.05)return target;
+  await new Promise(resolve=>{
+    const done=()=>{video.removeEventListener("seeked",done);resolve();};
+    video.addEventListener("seeked",done);
+    video.currentTime=target;
+  });
+  return target;
+}
+function canvasToBlob(canvas,type="image/png",quality=.92){
+  return new Promise(resolve=>canvas.toBlob(resolve,type,quality));
+}
+
+async function executeTool(action){
+  const tool=action.tool,args=action.args||{};
+  if(tool==="task.create"){
+    const title=String(args.title||"").trim();
+    if(!title)throw new Error("缺少待辦名稱");
+    const id=await addTask(title);await renderTasks();
+    return {ok:true,id,title};
+  }
+  if(tool==="task.list"){
+    const tasks=await listTasks();
+    return {ok:true,tasks:tasks.map(t=>({id:t.id,title:t.title,done:t.done}))};
+  }
+  if(tool==="task.complete"){
+    const item=await completeTaskByQuery(args.query||"");
+    await renderTasks();
+    return item?{ok:true,completed:item.title}:{ok:false,message:"找不到符合的未完成待辦"};
+  }
+  if(tool==="task.delete"){
+    const item=await deleteTaskByQuery(args.query||"");
+    await renderTasks();
+    return item?{ok:true,deleted:item.title}:{ok:false,message:"找不到符合待辦"};
+  }
+  if(tool==="camera.open"){
+    await ensureCamera();
+    return {ok:true,camera:"open"};
+  }
+  if(tool==="camera.capture"){
+    return {ok:true,...await captureImage()};
+  }
+  if(["vision.pose","vision.gesture","vision.face","vision.hand"].includes(tool)){
+    await ensureCamera();
+    const type=tool.split(".")[1];
+    const result=await analyzeVision(type,els.agentCameraVideo);
+    return {ok:true,...result};
+  }
+  if(tool==="image.describe"){
+    if(!attachedImage)throw new Error("沒有圖片；請先附加圖片或讓 Agent 拍照");
+    await prepareVLM();
+    const english=await translateVisionQuestion(args.question||"描述這張圖片");
+    const text=await analyzeImage(attachedImage,`Describe the image. Focus on this request: ${english}`,s=>els.skillPackStatus.textContent=s);
+    return {ok:true,visionText:text};
+  }
+  if(tool==="image.grayscale"){
+    if(!attachedImage)throw new Error("沒有圖片；請先附加圖片或拍照");
+    await loadImageToCanvas(attachedImage,els.agentCanvas);
+    grayscaleCanvas(els.agentCanvas);
+    attachedImage=await canvasToBlob(els.agentCanvas);
+    attachedImage.name="灰階結果.png";
+    els.agentCanvas.classList.remove("hidden");
+    updateAttachmentStatus();
+    return {ok:true,message:"圖片已轉成灰階並顯示在 Agent 頁面"};
+  }
+  if(tool==="video.frame"){
+    const time=await seekVideo(args.time??0);
+    captureVideoFrame(els.agentVideoPreview,els.agentCanvas);
+    attachedImage=await canvasToBlob(els.agentCanvas);
+    attachedImage.name=`影片 ${time.toFixed(1)} 秒截圖.png`;
+    els.agentCanvas.classList.remove("hidden");
+    updateAttachmentStatus();
+    return {ok:true,time:Number(time.toFixed(2)),message:"已擷取影片畫面，結果同時成為目前圖片附件"};
+  }
+  throw new Error(`未知工具：${tool}`);
+}
+
+function agentContext(){
+  return [
+    `圖片附件：${attachedImage?"有":"無"}`,
+    `影片附件：${attachedVideo?"有":"無"}`,
+    `相機：${cameraActive?"已開啟":"未開啟"}`,
+    `Whisper：${isWhisperReady()?"已載入":"未載入"}`,
+    `SmolVLM：${isVLMReady()?"已載入":"未載入"}`
+  ].join("；");
+}
+
+async function repairRefusal(goal,answer){
+  if(!looksLikeRefusal(answer))return answer;
+  const r=await chat([
+    {role:"system",content:CHAT_SYSTEM_PROMPT+"\n上一個回答可能誤拒絕。若這是一般知識問題，直接正常回答。"},
+    {role:"user",content:goal}
+  ],()=>{},{max_tokens:220,temperature:.3});
+  return r.output;
+}
+
+async function runAgent(goalInput){
+  const goal=String(goalInput??els.agentInput.value).trim();
+  if(!goal||agentRunning)return;
+  if(!isModelReady()){
+    showPage("models");
+    setAgentStatus("請先在模型頁啟動 Qwen。","warn");
+    els.skillPackStatus.textContent="Qwen 是 Agent 的大腦，必須先載入。";
+    return;
+  }
+
+  agentRunning=true;
+  els.runAgentBtn.disabled=true;
+  els.agentAnswer.textContent="Agent 執行中…";
+  els.traceDetails.open=true;
+  currentSteps=[];
+  renderLiveTrace(currentSteps);
+  setAgentStatus("Qwen 正在決定第一步…");
+
+  const observations=[];
+  let finalAnswer="";
+  let success=false;
+
   try{
-    let text=await analyzeImage(blob,els.visionPrompt.value, s=>els.vlmStatus.textContent=s);
-    if(isModelReady()){
-      const translated=await chat([{role:"system",content:CHAT_SYSTEM_PROMPT},{role:"user",content:`將以下圖片分析整理成台灣繁體中文，保留事實：\n${text}`}],()=>{},{max_tokens:180,temperature:.2});
-      text=translated.output;
+    for(let step=1;step<=6;step++){
+      setAgentStatus(`Step ${step}：Qwen 正在決定下一步…`);
+      const action=await nextAgentAction(chat,{goal,observations,step,context:agentContext()});
+
+      if(isFinishAction(action)){
+        finalAnswer=String(action.args?.message||"任務完成");
+        finalAnswer=await repairRefusal(goal,finalAnswer);
+        finalAnswer=await taiwanize(finalAnswer);
+        success=true;
+        break;
+      }
+
+      const trace={tool:action.tool,args:action.args||{},reason:action.reason||"",raw:action.raw||""};
+      const started=performance.now();
+      try{
+        setAgentStatus(`Step ${step}：執行 ${action.tool}…`);
+        trace.result=await executeTool(action);
+        trace.ms=Math.round(performance.now()-started);
+      }catch(error){
+        trace.error=true;
+        trace.result={ok:false,error:error?.message||String(error)};
+        trace.ms=Math.round(performance.now()-started);
+      }
+
+      currentSteps.push(trace);
+      observations.push({tool:action.tool,result:trace.result});
+      renderLiveTrace(currentSteps);
     }
-    els.vlmResult.textContent=await taiwanize(text);
-  }catch(e){els.vlmResult.textContent=`錯誤：${e.message||e}`;}
+
+    if(!finalAnswer){
+      finalAnswer="已達 6 步 Agent 上限，這次任務沒有在限制內自行完成。";
+    }
+    els.agentAnswer.textContent=finalAnswer;
+    setAgentStatus(success?`完成｜${currentSteps.length} 個工具步驟`:`停止｜已達步驟上限`,success?"ok":"warn");
+
+    await addAgentRun({goal,answer:finalAnswer,steps:currentSteps,success});
+    await renderRunLogs();
+    await renderTasks();
+    await renderHealth();
+  }catch(error){
+    finalAnswer=`Agent 執行失敗：${error?.message||error}`;
+    els.agentAnswer.textContent=finalAnswer;
+    setAgentStatus(finalAnswer,"danger");
+    await addAgentRun({goal,answer:finalAnswer,steps:currentSteps,success:false});
+    await renderRunLogs();
+  }finally{
+    agentRunning=false;
+    els.runAgentBtn.disabled=false;
+  }
 }
 
-function setupInstallUI(){
-  els.installHint.textContent=isStandalone()?"已用 PWA 模式執行；模型與程式更新分開管理。":/iphone|ipad|ipod/i.test(navigator.userAgent)?"iPhone：Safari 分享 → 加入主畫面。":"可安裝成 PWA。";
+async function handleAgentFile(file){
+  if(!file)return;
+  if(file.type.startsWith("image/")){
+    attachedImage=file;attachedVideo=null;
+    await loadImageToCanvas(file,els.agentCanvas);
+    els.agentCanvas.classList.remove("hidden");
+    els.agentVideoPreview.classList.add("hidden");
+  }else if(file.type.startsWith("video/")){
+    attachedVideo=file;attachedImage=null;
+    await ensureVideoReady();
+    els.agentCanvas.classList.add("hidden");
+  }
+  updateAttachmentStatus();
 }
 
-async function init(){
-  els.versionLabel.textContent=`v${APP_VERSION}`;renderFeatureGrid();setupInstallUI();configureEngineUI();
-  await renderDeviceStats();renderAIStats();await refreshModelInventory();await renderTasks();taiwanize("初始化");
+async function toggleVoiceInput(){
+  if(!voiceRecording){
+    try{
+      setAgentStatus("準備 Whisper…");
+      await prepareWhisper();
+      await startRecording();
+      voiceRecording=true;
+      els.agentVoiceBtn.textContent="停止語音";
+      setAgentStatus("錄音中…再按一次會停止、轉文字並直接交給 Agent。");
+    }catch(e){setAgentStatus(`語音啟動失敗：${e.message||e}`,"danger");}
+    return;
+  }
+  try{
+    els.agentVoiceBtn.disabled=true;
+    setAgentStatus("Whisper 本機轉錄中…");
+    let text=await stopAndTranscribe(r=>setAgentStatus(r?.file||r?.status||"語音處理中…"));
+    text=await taiwanize(text);
+    els.agentInput.value=text.trim();
+    voiceRecording=false;
+    els.agentVoiceBtn.textContent="語音輸入";
+    els.agentVoiceBtn.disabled=false;
+    if(text.trim())await runAgent(text.trim());
+  }catch(e){
+    voiceRecording=false;
+    els.agentVoiceBtn.textContent="語音輸入";
+    els.agentVoiceBtn.disabled=false;
+    setAgentStatus(`語音失敗：${e.message||e}`,"danger");
+  }
+}
 
-  els.tabs.addEventListener("click",e=>{const b=e.target.closest("button[data-page]");if(b)showPage(b.dataset.page);});
+async function runSkillCard(button){
+  const prompt=button.dataset.prompt||"";
+  showPage("agent");
+  els.agentInput.value=prompt;
+  if(prompt.includes("這張圖片")&&!attachedImage){
+    setAgentStatus("這個測試需要圖片：先按「＋ 圖片／影片」附加一張圖片。","warn");
+    return;
+  }
+  if(prompt.includes("這支影片")&&!attachedVideo){
+    setAgentStatus("這個測試需要影片：先按「＋ 圖片／影片」附加一支影片。","warn");
+    return;
+  }
+  await runAgent(prompt);
+}
 
+async function initPWA(){
   await setupPWA({
     onUpdate:reg=>{updateRegistration=reg;els.updateBtn.textContent="立即更新";els.updateStatus.textContent=`目前 v${APP_VERSION}｜新版已準備完成`;},
     onInstallReady:()=>els.installBtn.classList.remove("hidden"),
     onControllerChange:()=>{if(!reloadingForUpdate){reloadingForUpdate=true;location.reload();}}
   });
-  const remote=await getRemoteVersion();els.updateStatus.textContent=remote&&remote!==APP_VERSION?`目前 v${APP_VERSION}｜最新 v${remote}`:`目前 v${APP_VERSION}｜已是最新版`;
+  const remote=await getRemoteVersion();
+  els.updateStatus.textContent=remote&&remote!==APP_VERSION?`目前 v${APP_VERSION}｜最新 v${remote}`:`目前 v${APP_VERSION}｜已是最新版`;
+}
+
+async function init(){
+  els.versionLabel.textContent=`v${APP_VERSION}`;
+  await renderDeviceStats();
+  renderQwenStats();
+  await refreshModelInventory();
+  await renderHealth();
+  await renderTasks();
+  await renderRunLogs();
+  await initPWA();
+  taiwanize("初始化");
+
+  els.mainNav.onclick=e=>{const b=e.target.closest("[data-page]");if(b)showPage(b.dataset.page);};
+  els.runAgentBtn.onclick=()=>runAgent();
+  els.agentFileInput.onchange=()=>handleAgentFile(els.agentFileInput.files?.[0]).catch(e=>setAgentStatus(e.message,"danger"));
+  els.clearAttachmentBtn.onclick=()=>{
+    attachedImage=null;attachedVideo=null;
+    if(videoObjectUrl){URL.revokeObjectURL(videoObjectUrl);videoObjectUrl=null;}
+    els.agentCanvas.classList.add("hidden");els.agentVideoPreview.classList.add("hidden");
+    if(cameraActive)closeCamera();updateAttachmentStatus();
+  };
+  els.agentCameraBtn.onclick=async()=>{try{cameraActive?closeCamera():await ensureCamera();}catch(e){setAgentStatus(`相機失敗：${e.message||e}`,"danger");}};
+  els.agentVoiceBtn.onclick=toggleVoiceInput;
+
+  els.skillCards.onclick=e=>{const b=e.target.closest(".skill-card");if(b)runSkillCard(b);};
+
+  els.taskForm.onsubmit=async e=>{e.preventDefault();const t=els.taskInput.value.trim();if(!t)return;await addTask(t);els.taskInput.value="";await renderTasks();};
+  els.taskList.onclick=async e=>{
+    const row=e.target.closest(".task");if(!row)return;
+    if(e.target.matches('input[type="checkbox"]'))await toggleTask(row.dataset.id);
+    if(e.target.closest(".task-delete"))await deleteTask(row.dataset.id);
+    await renderTasks();
+  };
+
+  els.clearLogsBtn.onclick=async()=>{if(!confirm("清除所有 Agent 執行紀錄？"))return;await clearAgentRuns();await renderRunLogs();};
+
+  els.loadQwenBtn.onclick=startQwen;
+  els.unloadQwenBtn.onclick=async()=>{await unloadModel();setModelProgress(0,"Qwen 已卸載 RAM，模型檔仍在手機。");renderQwenStats();await renderHealth();};
+  els.scanModelsBtn.onclick=refreshModelInventory;
+  els.cleanupCpuBtn.onclick=async()=>{
+    if(!confirm("清理 CPU/WASM Qwen 快取？GPU 版會保留。"))return;
+    const r=await deleteCPUModelCache();els.modelScanNote.textContent=`已清理 ${r.deletedEntries} 個 CPU/WASM 快取檔。`;
+    await refreshModelInventory();await renderDeviceStats();
+  };
+  els.loadWhisperBtn.onclick=()=>prepareWhisper().catch(e=>els.skillPackStatus.textContent=`Whisper 失敗：${e.message||e}`);
+  els.loadMediaPipeBtn.onclick=()=>prepareMediaPipe().catch(e=>els.skillPackStatus.textContent=`MediaPipe 失敗：${e.message||e}`);
+  els.loadVlmBtn.onclick=()=>prepareVLM().catch(e=>els.skillPackStatus.textContent=`SmolVLM 失敗：${e.message||e}`);
+  els.offlineCheckBtn.onclick=async()=>{
+    const r=await runOfflineChecks(scanModelInventory);
+    els.offlineResult.innerHTML=r.map(([a,b])=>stat(a,b,(b.includes("支援")||b.includes("已"))?"ok":"")).join("");
+  };
 
   els.updateBtn.onclick=async()=>{
     if(updateRegistration?.waiting){applyUpdate(updateRegistration);return;}
-    els.updateBtn.disabled=true;els.updateBtn.textContent="檢查中…";const r=await checkForUpdate();
+    els.updateBtn.disabled=true;els.updateBtn.textContent="檢查中…";
+    const r=await checkForUpdate();
     if(r.waiting){updateRegistration=r.registration;els.updateBtn.textContent="立即更新";els.updateStatus.textContent=`目前 v${APP_VERSION}｜新版已準備完成`;}
     else if(r.hasUpdate){els.updateBtn.textContent="重新整理更新";els.updateStatus.textContent=`目前 v${APP_VERSION}｜最新 v${r.remoteVersion}`;}
     else{els.updateBtn.textContent="檢查更新";els.updateStatus.textContent=`目前 v${APP_VERSION}｜已是最新版`;}
@@ -206,44 +555,7 @@ async function init(){
   };
   els.installBtn.onclick=async()=>{if(await promptInstall())els.installBtn.classList.add("hidden");};
 
-  els.loadModelBtn.onclick=startModel;
-  els.unloadBtn.onclick=async()=>{await unloadModel();els.chatInput.disabled=true;els.sendBtn.disabled=true;els.unloadBtn.disabled=true;els.loadModelBtn.disabled=false;els.modeBadge.classList.remove("ok");configureEngineUI();renderAIStats();};
-  els.modelScanBtn.onclick=refreshModelInventory;
-  els.cleanupCpuBtn.onclick=async()=>{if(!confirm("清理 CPU/WASM Qwen 快取？GPU 版會保留。"))return;const r=await deleteCPUModelCache();els.modelScanNote.textContent=`已清理 ${r.deletedEntries} 個 CPU/WASM 快取檔。`;await refreshModelInventory();await renderDeviceStats();};
-
-  els.chatForm.onsubmit=sendChat;els.clearChatBtn.onclick=()=>{history.splice(1);els.messages.innerHTML='<div class="message assistant">對話已清除。</div>';};
-  els.agentRunBtn.onclick=()=>executeAgent().catch(e=>els.agentResult.textContent=`錯誤：${e.message||e}`);
-
-  els.taskForm.onsubmit=async e=>{e.preventDefault();const t=els.taskInput.value.trim();if(!t)return;await addTask(t);els.taskInput.value="";await renderTasks();};
-  els.taskList.onclick=async e=>{const row=e.target.closest(".task");if(!row)return;if(e.target.matches('input[type="checkbox"]'))await toggleTask(row.dataset.id);if(e.target.closest(".task-delete"))await deleteTask(row.dataset.id);await renderTasks();};
-
-  els.whisperLoadBtn.onclick=async()=>{els.voiceStatus.textContent="載入 Whisper…";try{await loadWhisper(r=>els.voiceStatus.textContent=r?.file||r?.status||"下載中…");els.voiceStatus.textContent="Whisper 已就緒";}catch(e){els.voiceStatus.textContent=`錯誤：${e.message||e}`;}};
-  els.recordBtn.onclick=async()=>{try{await startRecording();els.recordBtn.disabled=true;els.stopRecordBtn.disabled=false;els.voiceStatus.textContent="錄音中…";}catch(e){els.voiceStatus.textContent=`錯誤：${e.message||e}`;}};
-  els.stopRecordBtn.onclick=async()=>{els.stopRecordBtn.disabled=true;els.voiceStatus.textContent="轉錄中…";try{const t=await stopAndTranscribe(r=>els.voiceStatus.textContent=r?.file||r?.status||"處理中…");els.voiceResult.textContent=await taiwanize(t);els.voiceStatus.textContent="完成";}catch(e){els.voiceResult.textContent=`錯誤：${e.message||e}`;}finally{els.recordBtn.disabled=false;}};
-
-  els.cameraStartBtn.onclick=()=>startCamera(els.cameraVideo).catch(e=>els.visionResult.textContent=`錯誤：${e.message||e}`);
-  els.cameraStopBtn.onclick=()=>stopCamera(els.cameraVideo);
-  document.querySelectorAll("[data-vision]").forEach(b=>b.onclick=()=>visionAnalyze(b.dataset.vision));
-  els.cameraCaptureBtn.onclick=async()=>{try{lastVisionBlob=await captureCamera(els.cameraVideo,els.cameraCanvas);els.cameraCanvas.classList.remove("hidden");els.vlmStatus.textContent="已拍照，可交給 SmolVLM。";}catch(e){els.vlmStatus.textContent=`錯誤：${e.message||e}`;}};
-  els.visionFile.onchange=()=>{lastVisionBlob=els.visionFile.files?.[0]||null;};
-  els.vlmLoadBtn.onclick=async()=>{els.vlmStatus.textContent="載入 SmolVLM…";try{await loadVLM(s=>els.vlmStatus.textContent=s);els.vlmStatus.textContent="SmolVLM 已就緒";}catch(e){els.vlmStatus.textContent=`錯誤：${e.message||e}`;}};
-  els.vlmAnalyzeBtn.onclick=vlmAnalyze;
-
-  els.imageFile.onchange=async()=>{const f=els.imageFile.files?.[0];if(f)await loadImageToCanvas(f,els.imageCanvas);};
-  els.grayBtn.onclick=()=>grayscaleCanvas(els.imageCanvas);els.exportImageBtn.onclick=()=>exportCanvas(els.imageCanvas);
-  els.audioPlayBtn.onclick=async()=>{const f=els.audioFile.files?.[0];if(!f)return;try{audioPlayback?.ctx?.close();audioPlayback=await playAudioFile(f,Number(els.audioGain.value),Number(els.audioRate.value));els.audioStatus.textContent=`播放中｜${audioPlayback.duration.toFixed(1)} 秒`;}catch(e){els.audioStatus.textContent=`錯誤：${e.message||e}`;}};
-  els.videoFile.onchange=()=>{const f=els.videoFile.files?.[0];if(f)loadVideo(f,els.videoPreview);};
-  els.videoPreview.onloadedmetadata=()=>{els.videoSeek.max=String(els.videoPreview.duration||100);};
-  els.videoSeek.oninput=()=>{els.videoPreview.currentTime=Number(els.videoSeek.value);};els.frameBtn.onclick=()=>captureVideoFrame(els.videoPreview,els.frameCanvas);
-
-  els.opfsWriteBtn.onclick=async()=>{try{const n=await writeOPFSDemo(els.opfsText.value);els.opfsResult.textContent=`已寫入：${n}`;}catch(e){els.opfsResult.textContent=`錯誤：${e.message||e}`;}};
-  els.opfsReadBtn.onclick=async()=>{try{els.opfsResult.textContent=await readOPFSDemo();}catch(e){els.opfsResult.textContent=`錯誤：${e.message||e}`;}};
-  els.offerBtn.onclick=async()=>{try{els.localSdp.value=await createPeerOffer(m=>els.peerResult.textContent=`收到：${m}`);els.peerResult.textContent="邀請已建立，把 SDP 給另一台裝置。";}catch(e){els.peerResult.textContent=`錯誤：${e.message||e}`;}};
-  els.applySdpBtn.onclick=async()=>{try{const answer=await applyRemoteDescription(els.remoteSdp.value,m=>els.peerResult.textContent=`收到：${m}`);if(answer)els.localSdp.value=answer;els.peerResult.textContent="已套用對方 SDP。";}catch(e){els.peerResult.textContent=`錯誤：${e.message||e}`;}};
-  els.peerSendBtn.onclick=()=>{try{sendPeerMessage(els.peerMsg.value);els.peerResult.textContent="已傳送";}catch(e){els.peerResult.textContent=`錯誤：${e.message||e}`;}};
-
-  els.gpuStartBtn.onclick=()=>startWebGLDemo(els.gpuCanvas,els.gpuStatus);
-  els.benchmarkBtn.onclick=async()=>{if(!isModelReady()){els.benchmarkResult.textContent="請先啟動 Qwen";return;}els.benchmarkResult.textContent="測試中…";try{const r=await runLLMBenchmark(chat);r.output=await taiwanize(r.output);els.benchmarkResult.textContent=JSON.stringify(r,null,2);}catch(e){els.benchmarkResult.textContent=`錯誤：${e.message||e}`;}};
-  els.offlineCheckBtn.onclick=async()=>{const r=await runOfflineChecks(scanModelInventory);els.offlineResult.innerHTML=r.map(([a,b])=>stat(a,b,b.includes("支援")||b.includes("已")?"ok":"")).join("");};
+  updateAttachmentStatus();
+  setAgentStatus(isModelReady()?"Agent 已可工作。":"先到「模型」啟動 Qwen。",isModelReady()?"ok":"");
 }
 init();

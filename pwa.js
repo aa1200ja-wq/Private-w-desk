@@ -1,4 +1,4 @@
-export const APP_VERSION = "0.1.5";
+export const APP_VERSION = "0.2.0";
 let deferredInstall = null;
 let registration = null;
 

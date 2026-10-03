@@ -127,9 +127,9 @@ function classifyCachedURL(rawUrl) {
 
 export async function scanModelInventory() {
   const inventory = {
-    gpu: { installed: false, caches: [], entries: 0 },
-    cpu: { installed: false, caches: [], entries: 0 },
-    duplicateCopies: [],
+    gpu: { installed: false, partial: false, caches: [], entries: 0, weightEntries: 0 },
+    cpu: { installed: false, partial: false, caches: [], entries: 0, weightEntries: 0 },
+    exactDuplicateUrls: [],
     cacheNames: [],
     packageCount: 0,
   };
@@ -138,29 +138,82 @@ export async function scanModelInventory() {
 
   const cacheNames = await caches.keys();
   inventory.cacheNames = cacheNames;
-
   const locations = { gpu: new Set(), cpu: new Set() };
+  const urlLocations = new Map();
+
   for (const cacheName of cacheNames) {
     const cache = await caches.open(cacheName);
     const requests = await cache.keys();
     for (const request of requests) {
-      const type = classifyCachedURL(request.url);
+      let decoded = request.url;
+      try { decoded = decodeURIComponent(request.url); } catch (_) {}
+
+      const type = classifyCachedURL(decoded);
       if (!type) continue;
-      inventory[type].installed = true;
+
       inventory[type].entries += 1;
       locations[type].add(cacheName);
+
+      const set = urlLocations.get(decoded) || new Set();
+      set.add(cacheName);
+      urlLocations.set(decoded, set);
+
+      if (type === "gpu" && (
+        decoded.includes("params_shard") ||
+        decoded.endsWith(".bin")
+      )) {
+        inventory.gpu.weightEntries += 1;
+      }
+
+      if (type === "cpu" && /\/onnx\/model[^/]*\.onnx(?:\?|$)/i.test(decoded)) {
+        inventory.cpu.weightEntries += 1;
+      }
     }
   }
 
-  for (const type of ["gpu", "cpu"]) {
-    inventory[type].caches = [...locations[type]];
-    if (inventory[type].caches.length > 1) {
-      inventory.duplicateCopies.push(type);
-    }
-  }
+  inventory.gpu.caches = [...locations.gpu];
+  inventory.cpu.caches = [...locations.cpu];
 
-  inventory.packageCount = Number(inventory.gpu.installed) + Number(inventory.cpu.installed);
+  inventory.gpu.installed = inventory.gpu.weightEntries > 0 ||
+    (getStoredBackend() === "webgpu" && wasModelLoadedBefore());
+  inventory.cpu.installed = inventory.cpu.weightEntries > 0;
+  inventory.gpu.partial = inventory.gpu.entries > 0 && !inventory.gpu.installed;
+  inventory.cpu.partial = inventory.cpu.entries > 0 && !inventory.cpu.installed;
+
+  inventory.exactDuplicateUrls = [...urlLocations.entries()]
+    .filter(([, names]) => names.size > 1)
+    .map(([url, names]) => ({ url, caches: [...names] }));
+
+  inventory.packageCount =
+    Number(inventory.gpu.installed) +
+    Number(inventory.cpu.installed);
+
   return inventory;
+}
+
+export async function deleteCPUModelCache() {
+  if (!("caches" in self)) return { deletedEntries: 0 };
+
+  let deletedEntries = 0;
+  const cacheNames = await caches.keys();
+
+  for (const cacheName of cacheNames) {
+    const cache = await caches.open(cacheName);
+    const requests = await cache.keys();
+    for (const request of requests) {
+      let decoded = request.url;
+      try { decoded = decodeURIComponent(request.url); } catch (_) {}
+      if (!decoded.includes("onnx-community/Qwen2.5-0.5B-Instruct")) continue;
+      if (await cache.delete(request)) deletedEntries += 1;
+    }
+  }
+
+  if (getStoredBackend() === "wasm") {
+    if (navigator.gpu) localStorage.setItem("pwd:last-backend", "webgpu");
+    else localStorage.removeItem("pwd:last-backend");
+  }
+
+  return { deletedEntries };
 }
 
 export async function unloadModel() {

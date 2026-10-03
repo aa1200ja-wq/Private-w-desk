@@ -1,6 +1,6 @@
-const APP_VERSION="0.3.0";
+const APP_VERSION="0.3.1";
 const SHELL_CACHE=`pwd-shell-${APP_VERSION}`;
-const RUNTIME_CACHE="pwd-runtime-v4";
+const RUNTIME_CACHE="pwd-runtime-v5";
 const APP_SHELL=[
 "./","./index.html","./styles.css","./app.js","./ai.js","./ai-worker.js","./cpu-worker.js","./whisper-worker.js","./smolvlm-worker.js","./pwa.js","./manifest.webmanifest","./version.json","./icon.svg",
 "./modules/i18n.js","./modules/db.js","./modules/agent.js","./modules/benchmark.js","./modules/offline.js","./modules/gpu.js","./modules/p2p.js","./modules/voice.js","./modules/vision.js","./modules/media.js","./modules/vlm.js"

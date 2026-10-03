@@ -1,6 +1,7 @@
 import {
   loadModel, unloadModel, isModelReady, chat,
-  wasModelLoadedBefore, preferredBackend, getBackendMode, getModelProfile
+  wasModelLoadedBefore, isModelInstalled, getStoredBackend, getStorageLocation,
+  preferredBackend, getBackendMode, getModelProfile
 } from "./ai.js";
 import {
   APP_VERSION, setupPWA, promptInstall, applyUpdate,
@@ -45,13 +46,17 @@ function configureEngineUI() {
   if (preferredBackend() === "webgpu") {
     els.modeBadge.textContent = "WebGPU 高速模式";
     els.engineDescription.textContent = "使用 WebGPU + WebLLM。模型約 290MB，下載後保存在這支裝置。";
-    els.loadModelBtn.textContent = "下載／啟動 AI（約 290MB）";
-    els.progressText.textContent = wasModelLoadedBefore() ? "偵測到既有模型快取，可直接啟動。" : "尚未下載 GPU 模型";
+    els.loadModelBtn.textContent = isModelInstalled() ? "從本機啟動 AI" : "下載／啟動 AI（約 290MB）";
+    els.progressText.textContent = isModelInstalled()
+      ? "模型已存在手機裡，目前尚未載入 RAM。"
+      : "尚未下載 GPU 模型";
   } else {
     els.modeBadge.textContent = "CPU 相容模式";
     els.engineDescription.textContent = "這支手機沒有 WebGPU，已自動改用 CPU/WASM + Transformers.js。完全本機，但推論會比較慢。";
-    els.loadModelBtn.textContent = "下載 CPU 版 AI（約 520MB）";
-    els.progressText.textContent = wasModelLoadedBefore() ? "偵測到曾使用本機模型；按下後會讀取可用快取。" : "首次下載約 520MB，建議使用 Wi‑Fi";
+    els.loadModelBtn.textContent = isModelInstalled() ? "從本機啟動 AI" : "下載 CPU 版 AI（約 520MB）";
+    els.progressText.textContent = isModelInstalled()
+      ? "模型已存在手機裡，目前尚未載入 RAM；啟動時直接讀快取。"
+      : "首次下載約 520MB，建議使用 Wi‑Fi";
   }
 }
 
@@ -72,13 +77,18 @@ async function renderDeviceStats() {
 
 function renderAIStats() {
   const profile = getModelProfile();
+  const installed = isModelInstalled();
+  const ready = isModelReady();
+  const storedBackend = getStoredBackend();
   els.aiStats.innerHTML = [
     stat("模型", "Qwen2.5 0.5B"),
-    stat("運算引擎", profile.mode, isModelReady() ? "ok" : ""),
+    stat("本機安裝狀態", installed ? "已下載到手機" : "尚未下載", installed ? "ok" : "warn"),
+    stat("儲存位置", installed ? getStorageLocation() : "—"),
+    stat("模型容量", profile.download),
+    stat("下載時使用引擎", storedBackend === "wasm" ? "CPU / WASM" : storedBackend === "webgpu" ? "WebGPU" : "尚未"),
+    stat("目前運算引擎", profile.mode, ready ? "ok" : ""),
+    stat("目前執行狀態", ready ? "已載入 RAM，可聊天" : installed ? "已下載，待啟動" : "未啟動", ready ? "ok" : "warn"),
     stat("量化", profile.quant),
-    stat("首次下載", profile.download),
-    stat("模型紀錄", wasModelLoadedBefore() ? "曾下載／載入" : "尚未", wasModelLoadedBefore() ? "ok" : "warn"),
-    stat("目前 RAM 狀態", isModelReady() ? "已載入" : "未載入", isModelReady() ? "ok" : "warn"),
   ].join("");
 }
 
@@ -88,7 +98,7 @@ async function startModel() {
   setProgress(0.01, preferredBackend() === "webgpu" ? "準備 WebLLM…" : "準備 Transformers.js / WASM…");
   try {
     await loadModel((report) => setProgress(report.progress ?? 0, report.text || "下載／載入模型…"));
-    setProgress(1, "AI 已就緒");
+    setProgress(1, "AI 已就緒｜模型已下載到手機並載入 RAM");
     els.modeBadge.textContent = getBackendMode() === "webgpu" ? "WebGPU AI 已啟動" : "CPU/WASM AI 已啟動";
     els.modeBadge.classList.add("ok");
     els.chatInput.disabled = false;
@@ -165,6 +175,7 @@ async function init() {
     els.sendBtn.disabled = true;
     els.modeBadge.classList.remove("ok");
     configureEngineUI();
+    els.progressText.textContent = "模型仍保存在手機，只卸載 RAM；下次不需重新下載。";
     renderAIStats();
   });
 

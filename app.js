@@ -1,7 +1,7 @@
 import {
   loadModel, unloadModel, isModelReady, chat,
   wasModelLoadedBefore, isModelInstalled, getStoredBackend, getStorageLocation,
-  scanModelInventory, preferredBackend, getBackendMode, getModelProfile
+  scanModelInventory, deleteCPUModelCache, preferredBackend, getBackendMode, getModelProfile
 } from "./ai.js";
 import {
   APP_VERSION, setupPWA, promptInstall, applyUpdate,
@@ -11,7 +11,7 @@ import {
 const $ = (id) => document.getElementById(id);
 const els = Object.fromEntries([
   "updateBtn","modeBadge","engineDescription","progressBar","progressText","progressPct",
-  "loadModelBtn","unloadBtn","deviceStats","aiStats","modelScanBtn","modelScanNote",
+  "loadModelBtn","unloadBtn","deviceStats","aiStats","modelScanBtn","cleanupCpuBtn","modelScanNote",
   "messages","chatForm","chatInput","sendBtn","clearChatBtn","perfText",
   "installHint","updateStatus","installBtn","versionLabel"
 ].map(id => [id, $(id)]));
@@ -95,17 +95,30 @@ function renderAIStats() {
 
   if (modelInventory) {
     rows.push(
-      stat("GPU Q4F16 版", modelInventory.gpu.installed ? "已安裝" : "未發現", modelInventory.gpu.installed ? "ok" : ""),
-      stat("CPU/WASM Q8 版", modelInventory.cpu.installed ? "已安裝" : "未發現", modelInventory.cpu.installed ? "ok" : ""),
-      stat("已安裝模型版本", `${modelInventory.packageCount} 套`, modelInventory.packageCount > 1 ? "warn" : "ok"),
       stat(
-        "重複／多模型檢查",
-        modelInventory.duplicateCopies.length
-          ? "發現同版本存在多個 Cache"
-          : modelInventory.packageCount > 1
-            ? "CPU＋GPU 並存（不同格式）"
-            : "未發現重複",
-        modelInventory.duplicateCopies.length ? "danger" : modelInventory.packageCount > 1 ? "warn" : "ok"
+        "GPU Q4F16 版",
+        modelInventory.gpu.installed ? "已安裝" : modelInventory.gpu.partial ? "部分殘留" : "未發現",
+        modelInventory.gpu.installed ? "ok" : modelInventory.gpu.partial ? "warn" : ""
+      ),
+      stat(
+        "CPU/WASM Q8 版",
+        modelInventory.cpu.installed ? "已安裝" : modelInventory.cpu.partial ? "部分殘留" : "未發現",
+        modelInventory.cpu.installed ? "warn" : modelInventory.cpu.partial ? "warn" : ""
+      ),
+      stat("完整模型版本", `${modelInventory.packageCount} 套`, modelInventory.packageCount > 1 ? "warn" : "ok"),
+      stat(
+        "精確重複檔檢查",
+        modelInventory.exactDuplicateUrls.length
+          ? `發現 ${modelInventory.exactDuplicateUrls.length} 個相同檔案重複`
+          : "未發現重複檔",
+        modelInventory.exactDuplicateUrls.length ? "danger" : "ok"
+      ),
+      stat(
+        "多格式狀態",
+        modelInventory.gpu.installed && (modelInventory.cpu.installed || modelInventory.cpu.partial)
+          ? "GPU＋CPU/WASM 同時存在"
+          : "單一執行格式",
+        modelInventory.gpu.installed && (modelInventory.cpu.installed || modelInventory.cpu.partial) ? "warn" : "ok"
       )
     );
   }
@@ -120,14 +133,19 @@ async function refreshModelInventory() {
   try {
     modelInventory = await scanModelInventory();
     renderAIStats();
-    if (modelInventory.packageCount === 0) {
+    const hasCpuData = modelInventory.cpu.installed || modelInventory.cpu.partial;
+    els.cleanupCpuBtn.classList.toggle("hidden", !hasCpuData || !navigator.gpu);
+
+    if (modelInventory.exactDuplicateUrls.length) {
+      els.modelScanNote.textContent = `發現 ${modelInventory.exactDuplicateUrls.length} 個完全相同的快取檔案重複。`;
+    } else if (modelInventory.gpu.installed && hasCpuData) {
+      els.modelScanNote.textContent = modelInventory.cpu.installed
+        ? "GPU 與 CPU/WASM 兩套格式同時存在；不會打架，但 CPU 版現在可清理。"
+        : "GPU 版完整；另外偵測到 CPU/WASM 部分下載殘留，可安全清理。";
+    } else if (modelInventory.packageCount === 0 && !modelInventory.gpu.partial && !modelInventory.cpu.partial) {
       els.modelScanNote.textContent = "沒有在 Cache Storage 偵測到已知模型。";
-    } else if (modelInventory.duplicateCopies.length) {
-      els.modelScanNote.textContent = "偵測到同一執行版本分散在多個 Cache；後續可清理。";
-    } else if (modelInventory.packageCount > 1) {
-      els.modelScanNote.textContent = "同時裝有 GPU 與 CPU 版；它們是同一基礎模型的不同執行格式，不算重複檔。";
     } else {
-      els.modelScanNote.textContent = "目前只偵測到 1 套模型執行版本，沒有重複。";
+      els.modelScanNote.textContent = "目前沒有偵測到模型衝突或重複檔。";
     }
   } catch (error) {
     els.modelScanNote.textContent = `掃描失敗：${error?.message || error}`;
@@ -213,6 +231,22 @@ async function init() {
     : `目前 v${APP_VERSION}｜已是最新版`;
 
   els.modelScanBtn.addEventListener("click", refreshModelInventory);
+  els.cleanupCpuBtn.addEventListener("click", async () => {
+    if (!confirm("要清理 CPU/WASM 版 Qwen 的本機快取嗎？GPU 版會保留。")) return;
+    els.cleanupCpuBtn.disabled = true;
+    els.cleanupCpuBtn.textContent = "清理中…";
+    try {
+      const result = await deleteCPUModelCache();
+      els.modelScanNote.textContent = `已清理 CPU/WASM 快取 ${result.deletedEntries} 個檔案；GPU 版保留。`;
+      await refreshModelInventory();
+      await renderDeviceStats();
+    } catch (error) {
+      els.modelScanNote.textContent = `清理失敗：${error?.message || error}`;
+    } finally {
+      els.cleanupCpuBtn.disabled = false;
+      els.cleanupCpuBtn.textContent = "清理 CPU/WASM 舊版";
+    }
+  });
   els.loadModelBtn.addEventListener("click", startModel);
   els.unloadBtn.addEventListener("click", async () => {
     await unloadModel();

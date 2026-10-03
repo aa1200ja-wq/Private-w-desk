@@ -1,7 +1,7 @@
 {
-  "name": "Private W Desk - 手機 AI 工作台",
-  "short_name": "AI 工作台",
-  "description": "完全在手機瀏覽器本機執行的小型 AI PWA 實驗工作台",
+  "name": "Private W Desk - 本機 AI Agent Lab",
+  "short_name": "AI Agent Lab",
+  "description": "測試小型本機語言模型能否透過工具呼叫成為手機 AI Agent",
   "start_url": "./",
   "scope": "./",
   "display": "standalone",

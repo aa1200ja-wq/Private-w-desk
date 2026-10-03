@@ -105,6 +105,18 @@ export function wasModelLoadedBefore() {
   return localStorage.getItem("pwd:model-ever-loaded") === "1";
 }
 
+export function isModelInstalled() {
+  return wasModelLoadedBefore();
+}
+
+export function getStoredBackend() {
+  return localStorage.getItem("pwd:last-backend");
+}
+
+export function getStorageLocation() {
+  return "此 PWA 的 WebKit 網站資料 / Cache Storage";
+}
+
 export async function unloadModel() {
   if (gpuEngine) await gpuEngine.unload();
   if (gpuWorker) gpuWorker.terminate();

@@ -1,4 +1,4 @@
-let recorder=null, chunks=[], stream=null, worker=null, pending=null;
+let recorder=null, chunks=[], stream=null, worker=null, pending=null, ready=false;
 
 function resample(input, inRate, outRate=16000){
   if(inRate===outRate) return input;
@@ -24,7 +24,7 @@ function ensureWorker(onProgress){
   worker=new Worker(new URL("../whisper-worker.js",import.meta.url),{type:"module"});
   worker.onmessage=({data})=>{
     if(data.type==="progress") onProgress?.(data.report);
-    if(data.type==="ready") pending?.resolve?.("ready");
+    if(data.type==="ready"){ ready=true; pending?.resolve?.("ready"); }
     if(data.type==="result") pending?.resolve?.(data.text);
     if(data.type==="error") pending?.reject?.(new Error(data.message));
   };
@@ -59,4 +59,4 @@ export async function stopAndTranscribe(onProgress){
   });
 }
 
-export function unloadWhisper(){ worker?.terminate(); worker=null; pending=null; }
+export function isWhisperReady(){ return ready; }\nexport function unloadWhisper(){ worker?.terminate(); worker=null; pending=null; ready=false; }

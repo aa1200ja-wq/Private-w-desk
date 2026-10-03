@@ -1,4 +1,4 @@
-const VERSION="0.10.22";
+const VERSION="1.0.1";
 const WASM=`https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@${VERSION}/wasm`;
 const MODELS={
   face:"https://storage.googleapis.com/mediapipe-models/face_landmarker/face_landmarker/float16/1/face_landmarker.task",

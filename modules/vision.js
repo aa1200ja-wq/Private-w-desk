@@ -49,7 +49,25 @@ export async function preloadVision(type){ await instance(type); return true; }\
   if(type==="face") return {faces:r.faceLandmarks?.length||0,landmarks:r.faceLandmarks?.[0]?.length||0};
   if(type==="hand") return {hands:r.landmarks?.length||0,landmarks:r.landmarks?.[0]?.length||0};
   if(type==="gesture") return {hands:r.gestures?.length||0,gesture:r.gestures?.[0]?.[0]?.categoryName||"None",score:r.gestures?.[0]?.[0]?.score||0};
-  if(type==="pose") return {poses:r.landmarks?.length||0,landmarks:r.landmarks?.[0]?.length||0};
+  if(type==="pose"){
+    const lm=r.landmarks?.[0];
+    if(!lm) return {poses:0,landmarks:0,summary:"沒有偵測到人體"};
+    const ls=lm[11],rs=lm[12],lh=lm[23],rh=lm[24];
+    const shoulderDeltaY=Math.abs((ls?.y??0)-(rs?.y??0));
+    const shoulderMidX=((ls?.x??0)+(rs?.x??0))/2;
+    const hipMidX=((lh?.x??0)+(rh?.x??0))/2;
+    const torsoLean=shoulderMidX-hipMidX;
+    const issues=[];
+    if(shoulderDeltaY>0.045) issues.push("左右肩高度差明顯");
+    if(Math.abs(torsoLean)>0.05) issues.push(torsoLean>0?"上半身偏右":"上半身偏左");
+    return {
+      poses:1,
+      landmarks:lm.length,
+      shoulderDeltaY:Number(shoulderDeltaY.toFixed(3)),
+      torsoLean:Number(torsoLean.toFixed(3)),
+      summary:issues.length?issues.join("；"):"肩線與軀幹大致平衡"
+    };
+  }
   return {};
 }
 

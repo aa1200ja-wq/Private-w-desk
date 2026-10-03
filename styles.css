@@ -67,3 +67,7 @@ textarea:focus { border-color: #577db8; }
 footer { display: flex; justify-content: space-between; gap: 12px; color: #6f7d8f; font-size: 11px; padding: 6px 2px; }
 @media (min-width: 680px) { .grid { grid-template-columns: 1fr 1fr; } .card { padding: 22px; } }
 @media (max-width: 460px) { .actions { grid-template-columns: 1fr; } .install-card { align-items: flex-start; flex-direction: column; } .install-card button { width: 100%; } }
+
+.model-tools { margin-top: 14px; padding-top: 14px; border-top: 1px solid rgba(255,255,255,.06); }
+.model-tools button { width: 100%; }
+.model-note { margin: 9px 0 0; color: var(--muted); font-size: 12px; line-height: 1.5; }

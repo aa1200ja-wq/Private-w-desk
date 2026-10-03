@@ -1,6 +1,6 @@
-const APP_VERSION = "0.1.1";
+const APP_VERSION = "0.1.2";
 const SHELL_CACHE = `pwd-shell-${APP_VERSION}`;
-const RUNTIME_CACHE = "pwd-runtime-v1";
+const RUNTIME_CACHE = "pwd-runtime-v2";
 const APP_SHELL = [
   "./",
   "./index.html",
@@ -8,6 +8,7 @@ const APP_SHELL = [
   "./app.js",
   "./ai.js",
   "./ai-worker.js",
+  "./cpu-worker.js",
   "./pwa.js",
   "./manifest.webmanifest",
   "./version.json",
@@ -21,7 +22,9 @@ self.addEventListener("install", (event) => {
 self.addEventListener("activate", (event) => {
   event.waitUntil((async () => {
     const keys = await caches.keys();
-    await Promise.all(keys.filter(k => k.startsWith("pwd-shell-") && k !== SHELL_CACHE).map(k => caches.delete(k)));
+    await Promise.all(
+      keys.filter(k => k.startsWith("pwd-shell-") && k !== SHELL_CACHE).map(k => caches.delete(k))
+    );
     await self.clients.claim();
   })());
 });
@@ -33,6 +36,7 @@ self.addEventListener("message", (event) => {
 self.addEventListener("fetch", (event) => {
   if (event.request.method !== "GET") return;
   const url = new URL(event.request.url);
+
   if (url.origin === self.location.origin) {
     event.respondWith((async () => {
       try {
@@ -46,7 +50,8 @@ self.addEventListener("fetch", (event) => {
     })());
     return;
   }
-  if (url.hostname === "esm.run") {
+
+  if (url.hostname === "esm.run" || url.hostname === "cdn.jsdelivr.net") {
     event.respondWith((async () => {
       const cached = await caches.match(event.request);
       if (cached) return cached;

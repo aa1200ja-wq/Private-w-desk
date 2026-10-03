@@ -1,4 +1,4 @@
-export const APP_VERSION = "0.1.1";
+export const APP_VERSION = "0.1.2";
 let deferredInstall = null;
 let registration = null;
 
@@ -45,5 +45,37 @@ export async function getRemoteVersion() {
     const res = await fetch(`./version.json?t=${Date.now()}`, { cache: "no-store" });
     if (!res.ok) return null;
     return (await res.json()).version ?? null;
-  } catch (_) { return null; }
+  } catch (_) {
+    return null;
+  }
+}
+
+function waitForWaiting(reg, timeout = 5000) {
+  return new Promise((resolve) => {
+    if (reg?.waiting) return resolve(true);
+    const end = Date.now() + timeout;
+    const timer = setInterval(() => {
+      if (reg?.waiting) {
+        clearInterval(timer);
+        resolve(true);
+      } else if (Date.now() >= end) {
+        clearInterval(timer);
+        resolve(false);
+      }
+    }, 200);
+  });
+}
+
+export async function checkForUpdate() {
+  const remoteVersion = await getRemoteVersion();
+  if (registration) await registration.update().catch(() => {});
+  if (remoteVersion && remoteVersion !== APP_VERSION && registration) {
+    await waitForWaiting(registration);
+  }
+  return {
+    remoteVersion,
+    registration,
+    waiting: Boolean(registration?.waiting),
+    hasUpdate: Boolean(remoteVersion && remoteVersion !== APP_VERSION),
+  };
 }

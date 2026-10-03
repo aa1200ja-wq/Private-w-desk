@@ -59,4 +59,5 @@ export async function stopAndTranscribe(onProgress){
   });
 }
 
-export function isWhisperReady(){ return ready; }\nexport function unloadWhisper(){ worker?.terminate(); worker=null; pending=null; ready=false; }
+export function isWhisperReady(){ return ready; }
+export function unloadWhisper(){ worker?.terminate(); worker=null; pending=null; ready=false; }

@@ -1,203 +1,203 @@
 <!doctype html>
 <html lang="zh-Hant">
 <head>
-  <meta charset="utf-8" />
-  <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover" />
-  <meta name="theme-color" content="#0d1117" />
-  <meta name="apple-mobile-web-app-capable" content="yes" />
-  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
-  <meta name="apple-mobile-web-app-title" content="AI 工作台" />
-  <link rel="manifest" href="./manifest.webmanifest" />
-  <link rel="icon" href="./icon.svg" type="image/svg+xml" />
-  <link rel="apple-touch-icon" href="./icon.svg" />
-  <link rel="stylesheet" href="./styles.css" />
-  <title>Private W Desk</title>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+  <meta name="theme-color" content="#0b1020">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <meta name="apple-mobile-web-app-title" content="AI Agent Lab">
+  <link rel="manifest" href="./manifest.webmanifest">
+  <link rel="icon" href="./icon.svg" type="image/svg+xml">
+  <link rel="apple-touch-icon" href="./icon.svg">
+  <link rel="stylesheet" href="./styles.css">
+  <title>Private W Desk Agent Lab</title>
 </head>
 <body>
 <main class="app-shell">
   <header class="topbar">
-    <div><p class="eyebrow">PRIVATE W DESK</p><h1>手機 AI 工作台</h1></div>
-    <button id="updateBtn" class="ghost">檢查更新</button>
+    <div>
+      <p class="eyebrow">PRIVATE W DESK</p>
+      <h1>本機 AI Agent Lab</h1>
+    </div>
+    <button id="updateBtn" class="ghost compact">檢查更新</button>
   </header>
 
-  <nav class="tabs" id="tabs">
-    <button data-page="home" class="active">總覽</button>
-    <button data-page="chat">AI</button>
-    <button data-page="tasks">待辦</button>
-    <button data-page="voice">語音</button>
-    <button data-page="vision">視覺</button>
-    <button data-page="media">影音</button>
-    <button data-page="storage">資料／P2P</button>
-    <button data-page="gpu">GPU／效能</button>
-    <button data-page="offline">離線</button>
+  <section class="agent-health card">
+    <div>
+      <span id="agentBadge" class="badge">Agent 尚未啟動</span>
+      <h2>Qwen2.5 0.5B 小型 Agent</h2>
+      <p id="agentHealthText" class="muted">目標：測試一顆 0.5B 本機模型，能不能自己選工具、執行、讀結果，再決定下一步。</p>
+    </div>
+    <div class="health-row">
+      <span id="qwenHealth">🧠 Qwen：檢查中</span>
+      <span id="skillHealth">🧩 技能包：檢查中</span>
+      <span id="gpuHealth">⚡ WebGPU：檢查中</span>
+    </div>
+  </section>
+
+  <nav class="main-nav" id="mainNav">
+    <button data-page="agent" class="active">Agent</button>
+    <button data-page="skills">技能</button>
+    <button data-page="tasks">任務</button>
+    <button data-page="logs">紀錄</button>
+    <button data-page="models">模型</button>
   </nav>
 
-  <section class="page active" data-page-panel="home">
-    <section class="hero card">
-      <span id="modeBadge" class="badge">偵測中</span>
-      <h2>Qwen2.5 0.5B 本機大腦</h2>
-      <p id="engineDescription">偵測本機 AI 引擎中。</p>
-      <div class="progress-wrap">
-        <div class="progress-track"><div id="progressBar" class="progress-bar"></div></div>
-        <div class="progress-row"><span id="progressText">尚未載入</span><span id="progressPct">0%</span></div>
-      </div>
-      <div class="actions">
-        <button id="loadModelBtn" class="primary">下載／啟動 AI</button>
-        <button id="unloadBtn" class="secondary" disabled>卸載記憶體</button>
-      </div>
-    </section>
-
-    <section class="grid">
-      <article class="card"><h3>裝置狀態</h3><dl id="deviceStats" class="stats"></dl></article>
-      <article class="card">
-        <h3>模型管理中心</h3><dl id="aiStats" class="stats"></dl>
-        <div class="model-tools">
-          <button id="modelScanBtn" class="secondary">掃描本機模型</button>
-          <button id="cleanupCpuBtn" class="secondary hidden">清理 CPU/WASM 舊版</button>
-          <p id="modelScanNote" class="model-note">尚未掃描</p>
-        </div>
-      </article>
-    </section>
-
+  <section class="page active" data-page-panel="agent">
     <article class="card">
-      <div class="section-title"><div><p class="eyebrow">21 FEATURES</p><h3>功能大框架</h3></div><span class="badge">v0.2.0</span></div>
-      <div id="featureGrid" class="feature-grid"></div>
+      <p class="eyebrow">AGENT INPUT</p>
+      <h3>直接交代一個目標</h3>
+      <textarea id="agentInput" class="agent-input" placeholder="例如：看看我現在坐姿，如果肩膀歪掉就新增一個『晚上伸展』待辦。"></textarea>
+
+      <div id="attachmentBar" class="attachment-bar">
+        <span id="attachmentStatus">沒有附件</span>
+        <button id="clearAttachmentBtn" class="ghost compact hidden">清除附件</button>
+      </div>
+
+      <div class="input-actions">
+        <label class="secondary file-btn">
+          ＋ 圖片／影片
+          <input id="agentFileInput" type="file" accept="image/*,video/*" hidden>
+        </label>
+        <button id="agentCameraBtn" class="secondary">開相機</button>
+        <button id="agentVoiceBtn" class="secondary">語音輸入</button>
+      </div>
+
+      <video id="agentCameraVideo" class="preview hidden" playsinline muted></video>
+      <video id="agentVideoPreview" class="preview hidden" controls playsinline></video>
+      <canvas id="agentCanvas" class="preview hidden"></canvas>
+
+      <button id="runAgentBtn" class="primary full">執行 Agent</button>
+      <p id="agentRunStatus" class="model-note">Qwen 啟動後即可執行。</p>
     </article>
 
-    <article class="card install-card">
-      <div><p class="eyebrow">PWA</p><h3>安裝與更新</h3>
-        <p id="installHint">檢查中…</p><p id="updateStatus">目前版本：v0.2.0｜尚未檢查更新</p>
+    <article class="card">
+      <div class="section-title">
+        <div><p class="eyebrow">RESULT</p><h3>Agent 最終結果</h3></div>
+        <span id="agentStepBadge" class="badge">0 step</span>
       </div>
-      <button id="installBtn" class="secondary hidden">安裝到手機</button>
+      <div id="agentAnswer" class="answer-box">尚未執行。</div>
+      <details id="traceDetails" class="trace-box">
+        <summary>查看這次 Agent 怎麼想、用了哪些工具</summary>
+        <div id="liveTrace" class="trace-list"></div>
+      </details>
     </article>
   </section>
 
-  <section class="page" data-page-panel="chat">
-    <article class="card chat-card">
-      <div class="section-title"><div><p class="eyebrow">LOCAL CHAT</p><h3>本機聊天室</h3></div><button id="clearChatBtn" class="ghost">清除</button></div>
-      <div id="messages" class="messages"><div class="message assistant">本版會強制轉成台灣繁體中文，並對一般知識的疑似誤拒答自動重試一次。</div></div>
-      <form id="chatForm" class="composer"><textarea id="chatInput" rows="2" placeholder="輸入訊息…" disabled></textarea><button id="sendBtn" class="primary" disabled>送出</button></form>
-      <div class="perf" id="perfText">尚未執行推論</div>
-    </article>
-
+  <section class="page" data-page-panel="skills">
     <article class="card">
-      <p class="eyebrow">TOOL CALLING</p><h3>AI 操作工作台</h3>
-      <p class="muted">例如：「幫我新增待辦：剪影片」或「打開相機」。</p>
-      <textarea id="agentInput" placeholder="輸入自然語言指令…"></textarea>
-      <div class="actions one"><button id="agentRunBtn" class="primary">讓 AI 判斷並執行</button></div>
-      <pre id="agentResult" class="result-box">尚未執行</pre>
+      <p class="eyebrow">AGENT SKILL TESTS</p>
+      <h3>直接測「AI 能不能自己完成」</h3>
+      <p class="muted">按一下把測試題送到 Agent。需要圖片／影片／相機的測試會提示你先準備素材。</p>
+      <div id="skillCards" class="skill-grid">
+        <button class="skill-card" data-prompt="新增一個待辦：晚上剪影片">
+          <b>新增待辦</b><span>自然語言 → Tool Calling → IndexedDB</span>
+        </button>
+        <button class="skill-card" data-prompt="列出我目前所有未完成待辦，然後告訴我總共有幾個">
+          <b>讀取本機資料</b><span>Agent → task.list → 整理結果</span>
+        </button>
+        <button class="skill-card" data-prompt="完成名稱包含『剪影片』的待辦">
+          <b>修改資料</b><span>理解條件 → 找待辦 → 完成</span>
+        </button>
+        <button class="skill-card" data-prompt="打開相機，看看我的坐姿。如果肩膀明顯不平，就新增一個『晚上伸展』待辦">
+          <b>多步姿勢任務</b><span>Camera → Pose → 判斷 → Task</span>
+        </button>
+        <button class="skill-card" data-prompt="看這張圖片裡有什麼，整理成一句台灣繁體中文">
+          <b>看懂圖片</b><span>SmolVLM → Qwen</span>
+        </button>
+        <button class="skill-card" data-prompt="把這張圖片變成灰階">
+          <b>操作圖片</b><span>理解需求 → Canvas 工具</span>
+        </button>
+        <button class="skill-card" data-prompt="擷取這支影片第 8 秒的畫面">
+          <b>操作影片</b><span>理解時間 → 抽 Frame</span>
+        </button>
+        <button class="skill-card" data-prompt="如果我現在比讚，就完成第一個未完成待辦；如果沒有比讚，就告訴我偵測到什麼">
+          <b>手勢觸發任務</b><span>Camera → Gesture → 條件執行</span>
+        </button>
+        <button class="skill-card" data-prompt="非洲有多大？請直接回答，不要把一般地理問題誤判成敏感內容">
+          <b>一般知識／誤拒答</b><span>測理解、錯字容錯、繁體輸出</span>
+        </button>
+      </div>
     </article>
   </section>
 
   <section class="page" data-page-panel="tasks">
     <article class="card">
-      <p class="eyebrow">INDEXEDDB</p><h3>待辦／資料操作</h3>
-      <form id="taskForm" class="inline-form"><input id="taskInput" placeholder="新增待辦"><button class="primary">新增</button></form>
+      <div class="section-title">
+        <div><p class="eyebrow">AGENT DATA</p><h3>Agent 實際改過的待辦</h3></div>
+        <span id="taskCount" class="badge">0</span>
+      </div>
+      <form id="taskForm" class="inline-form">
+        <input id="taskInput" placeholder="也可以手動新增，方便對照測試">
+        <button class="secondary">新增</button>
+      </form>
       <div id="taskList" class="task-list"></div>
     </article>
   </section>
 
-  <section class="page" data-page-panel="voice">
+  <section class="page" data-page-panel="logs">
     <article class="card">
-      <p class="eyebrow">WHISPER</p><h3>本機語音辨識</h3>
-      <p class="muted">Whisper Tiny 按需下載，CPU/WASM 執行。</p>
+      <div class="section-title">
+        <div><p class="eyebrow">AGENT TRACE</p><h3>執行紀錄</h3></div>
+        <button id="clearLogsBtn" class="ghost compact">清除紀錄</button>
+      </div>
+      <p class="muted">每次 Agent 的工具選擇、工具結果、失敗與重試都會存在手機 IndexedDB。</p>
+      <div id="runLogs" class="run-logs"></div>
+    </article>
+  </section>
+
+  <section class="page" data-page-panel="models">
+    <article class="card">
+      <p class="eyebrow">CORE MODEL</p>
+      <h3>Qwen2.5 0.5B</h3>
+      <dl id="qwenStats" class="stats"></dl>
       <div class="actions">
-        <button id="whisperLoadBtn" class="secondary">下載／載入 Whisper</button>
-        <button id="recordBtn" class="primary">開始錄音</button>
+        <button id="loadQwenBtn" class="primary">下載／啟動 Qwen</button>
+        <button id="unloadQwenBtn" class="secondary" disabled>卸載 RAM</button>
       </div>
-      <button id="stopRecordBtn" class="secondary full" disabled>停止並轉文字</button>
-      <p id="voiceStatus" class="model-note">尚未載入</p>
-      <pre id="voiceResult" class="result-box">尚無轉錄結果</pre>
-    </article>
-  </section>
-
-  <section class="page" data-page-panel="vision">
-    <article class="card">
-      <p class="eyebrow">CAMERA + MEDIAPIPE</p><h3>相機／Face／Hand／Gesture／Pose</h3>
-      <video id="cameraVideo" class="preview" playsinline muted></video>
-      <canvas id="cameraCanvas" class="preview hidden"></canvas>
-      <div class="actions"><button id="cameraStartBtn" class="primary">開啟相機</button><button id="cameraStopBtn" class="secondary">關閉相機</button></div>
-      <div class="button-grid">
-        <button data-vision="face" class="secondary">Face</button>
-        <button data-vision="hand" class="secondary">Hand</button>
-        <button data-vision="gesture" class="secondary">Gesture</button>
-        <button data-vision="pose" class="secondary">Pose</button>
+      <div class="progress-wrap">
+        <div class="progress-track"><div id="modelProgressBar" class="progress-bar"></div></div>
+        <div class="progress-row"><span id="modelProgressText">尚未載入</span><span id="modelProgressPct">0%</span></div>
       </div>
-      <button id="cameraCaptureBtn" class="secondary full">拍一張給 Vision AI</button>
-      <pre id="visionResult" class="result-box">尚未分析</pre>
+      <button id="scanModelsBtn" class="secondary full">掃描本機模型</button>
+      <button id="cleanupCpuBtn" class="ghost full hidden">清理 CPU/WASM 舊版</button>
+      <p id="modelScanNote" class="model-note">尚未掃描</p>
     </article>
 
     <article class="card">
-      <p class="eyebrow">SMOLVLM 256M</p><h3>圖片理解</h3>
-      <input id="visionFile" type="file" accept="image/*">
-      <input id="visionPrompt" value="Describe this image briefly." placeholder="圖片問題">
-      <div class="actions"><button id="vlmLoadBtn" class="secondary">載入 SmolVLM</button><button id="vlmAnalyzeBtn" class="primary">分析圖片</button></div>
-      <p id="vlmStatus" class="model-note">按需下載，建議先卸載 Qwen RAM 再測極限。</p>
-      <pre id="vlmResult" class="result-box">尚未分析</pre>
+      <p class="eyebrow">SKILL PACKS</p>
+      <h3>Agent 技能包</h3>
+      <div class="model-card">
+        <div><b>Whisper Tiny</b><span>耳朵｜語音轉文字</span></div>
+        <button id="loadWhisperBtn" class="secondary">載入</button>
+      </div>
+      <div class="model-card">
+        <div><b>MediaPipe</b><span>身體感知｜Face / Hand / Gesture / Pose</span></div>
+        <button id="loadMediaPipeBtn" class="secondary">載入</button>
+      </div>
+      <div class="model-card">
+        <div><b>SmolVLM 256M</b><span>眼睛｜圖片理解</span></div>
+        <button id="loadVlmBtn" class="secondary">載入</button>
+      </div>
+      <p id="skillPackStatus" class="model-note">技能包採按需下載／載入。</p>
+    </article>
+
+    <article class="card">
+      <p class="eyebrow">DEVICE / PWA</p>
+      <h3>Agent 執行環境</h3>
+      <dl id="deviceStats" class="stats"></dl>
+      <button id="offlineCheckBtn" class="secondary full">檢查離線準備狀態</button>
+      <div id="offlineResult" class="stats mini-stats"></div>
+      <p id="updateStatus" class="model-note">目前版本：v0.3.0</p>
+      <button id="installBtn" class="secondary full hidden">安裝 PWA</button>
     </article>
   </section>
 
-  <section class="page" data-page-panel="media">
-    <article class="card">
-      <p class="eyebrow">CANVAS</p><h3>圖片處理</h3>
-      <input id="imageFile" type="file" accept="image/*"><canvas id="imageCanvas" class="preview"></canvas>
-      <div class="actions"><button id="grayBtn" class="secondary">灰階</button><button id="exportImageBtn" class="primary">匯出 PNG</button></div>
-    </article>
-    <article class="card">
-      <p class="eyebrow">WEBAUDIO</p><h3>音訊處理</h3>
-      <input id="audioFile" type="file" accept="audio/*">
-      <label>音量 <input id="audioGain" type="range" min="0" max="2" step=".1" value="1"></label>
-      <label>速度 <input id="audioRate" type="range" min=".5" max="2" step=".1" value="1"></label>
-      <button id="audioPlayBtn" class="primary full">播放</button><p id="audioStatus" class="model-note">尚未播放</p>
-    </article>
-    <article class="card">
-      <p class="eyebrow">VIDEO FRAME</p><h3>影片抽 Frame</h3>
-      <input id="videoFile" type="file" accept="video/*"><video id="videoPreview" class="preview" controls playsinline></video>
-      <input id="videoSeek" type="range" min="0" max="100" value="0">
-      <button id="frameBtn" class="primary full">擷取目前畫面</button><canvas id="frameCanvas" class="preview"></canvas>
-    </article>
-  </section>
-
-  <section class="page" data-page-panel="storage">
-    <article class="card">
-      <p class="eyebrow">OPFS / INDEXEDDB</p><h3>本機檔案與資料庫</h3>
-      <textarea id="opfsText">這是 Private W Desk 的 OPFS 測試文字。</textarea>
-      <div class="actions"><button id="opfsWriteBtn" class="primary">寫入 OPFS</button><button id="opfsReadBtn" class="secondary">讀取 OPFS</button></div>
-      <pre id="opfsResult" class="result-box">尚未測試</pre>
-    </article>
-    <article class="card">
-      <p class="eyebrow">WEBRTC</p><h3>P2P 手動配對實驗室</h3>
-      <button id="offerBtn" class="primary full">建立連線邀請</button>
-      <textarea id="localSdp" placeholder="本機 SDP"></textarea><textarea id="remoteSdp" placeholder="貼上另一台裝置 SDP"></textarea>
-      <button id="applySdpBtn" class="secondary full">套用對方 SDP</button>
-      <div class="inline-form"><input id="peerMsg" placeholder="P2P 訊息"><button id="peerSendBtn" class="primary">傳送</button></div>
-      <pre id="peerResult" class="result-box">尚未連線</pre>
-    </article>
-  </section>
-
-  <section class="page" data-page-panel="gpu">
-    <article class="card">
-      <p class="eyebrow">3D / GPU</p><h3>GPU Demo</h3>
-      <canvas id="gpuCanvas" width="640" height="360" class="preview"></canvas>
-      <button id="gpuStartBtn" class="primary full">啟動 WebGL Demo</button><p id="gpuStatus" class="model-note">尚未啟動</p>
-    </article>
-    <article class="card">
-      <p class="eyebrow">BENCHMARK</p><h3>本機 AI 效能測試</h3>
-      <button id="benchmarkBtn" class="primary full">執行 Qwen Benchmark</button>
-      <pre id="benchmarkResult" class="result-box">尚未測試</pre>
-    </article>
-  </section>
-
-  <section class="page" data-page-panel="offline">
-    <article class="card">
-      <p class="eyebrow">OFFLINE</p><h3>完全離線檢查</h3>
-      <p class="muted">先把需要的模型與技能包下載完，再關閉 Wi‑Fi／行動網路實測。</p>
-      <button id="offlineCheckBtn" class="primary full">執行離線準備檢查</button>
-      <div id="offlineResult" class="stats"></div>
-    </article>
-  </section>
-
-  <footer><span id="versionLabel">v0.2.0</span><span>GitHub Pages / WebGPU / WASM</span></footer>
+  <footer>
+    <span id="versionLabel">v0.3.0</span>
+    <span>Local Agent / WebGPU / PWA</span>
+  </footer>
 </main>
 <script type="module" src="./app.js"></script>
 </body>

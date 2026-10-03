@@ -1,14 +1,23 @@
-import { MODEL_ID, loadModel, unloadModel, isModelReady, chat, wasModelLoadedBefore } from "./ai.js";
-import { APP_VERSION, setupPWA, promptInstall, applyUpdate, isStandalone, getRemoteVersion, checkForUpdate } from "./pwa.js";
+import {
+  loadModel, unloadModel, isModelReady, chat,
+  wasModelLoadedBefore, preferredBackend, getBackendMode, getModelProfile
+} from "./ai.js";
+import {
+  APP_VERSION, setupPWA, promptInstall, applyUpdate,
+  isStandalone, getRemoteVersion, checkForUpdate
+} from "./pwa.js";
 
 const $ = (id) => document.getElementById(id);
 const els = Object.fromEntries([
-  "updateBtn","modeBadge","progressBar","progressText","progressPct","loadModelBtn","unloadBtn",
-  "deviceStats","aiStats","messages","chatForm","chatInput","sendBtn","clearChatBtn","perfText",
-  "installHint","updateStatus","installBtn","versionLabel"
+  "updateBtn","modeBadge","engineDescription","progressBar","progressText","progressPct",
+  "loadModelBtn","unloadBtn","deviceStats","aiStats","messages","chatForm","chatInput",
+  "sendBtn","clearChatBtn","perfText","installHint","updateStatus","installBtn","versionLabel"
 ].map(id => [id, $(id)]));
 
-const history = [{ role: "system", content: "你是手機內的本機 AI 助手。全程使用台灣繁體中文，回答精簡、直接。" }];
+const history = [{
+  role: "system",
+  content: "你是手機內的本機 AI 助手。全程使用台灣繁體中文，回答精簡、直接。"
+}];
 let updateRegistration = null;
 let reloadingForUpdate = false;
 
@@ -32,13 +41,28 @@ function stat(label, value, cls = "") {
   return `<div class="stat"><dt>${label}</dt><dd class="${cls}">${value}</dd></div>`;
 }
 
+function configureEngineUI() {
+  if (preferredBackend() === "webgpu") {
+    els.modeBadge.textContent = "WebGPU 高速模式";
+    els.engineDescription.textContent = "使用 WebGPU + WebLLM。模型約 290MB，下載後保存在這支裝置。";
+    els.loadModelBtn.textContent = "下載／啟動 AI（約 290MB）";
+    els.progressText.textContent = wasModelLoadedBefore() ? "偵測到既有模型快取，可直接啟動。" : "尚未下載 GPU 模型";
+  } else {
+    els.modeBadge.textContent = "CPU 相容模式";
+    els.engineDescription.textContent = "這支手機沒有 WebGPU，已自動改用 CPU/WASM + Transformers.js。完全本機，但推論會比較慢。";
+    els.loadModelBtn.textContent = "下載 CPU 版 AI（約 520MB）";
+    els.progressText.textContent = wasModelLoadedBefore() ? "偵測到曾使用本機模型；按下後會讀取可用快取。" : "首次下載約 520MB，建議使用 Wi‑Fi";
+  }
+}
+
 async function renderDeviceStats() {
   const estimate = navigator.storage?.estimate ? await navigator.storage.estimate() : null;
   const used = estimate?.usage ? `${(estimate.usage / 1024 / 1024).toFixed(0)} MB` : "未知";
   const quota = estimate?.quota ? `${(estimate.quota / 1024 / 1024 / 1024).toFixed(1)} GB` : "未知";
   const webgpu = Boolean(navigator.gpu);
   els.deviceStats.innerHTML = [
-    stat("WebGPU", webgpu ? "支援" : "不支援", webgpu ? "ok" : "danger"),
+    stat("WebGPU", webgpu ? "支援" : "不支援", webgpu ? "ok" : "warn"),
+    stat("CPU/WASM 備援", "支援", "ok"),
     stat("PWA 模式", isStandalone() ? "已安裝" : "瀏覽器", isStandalone() ? "ok" : "warn"),
     stat("CPU 執行緒", navigator.hardwareConcurrency ?? "未知"),
     stat("網站已用空間", used),
@@ -47,25 +71,25 @@ async function renderDeviceStats() {
 }
 
 function renderAIStats() {
+  const profile = getModelProfile();
   els.aiStats.innerHTML = [
     stat("模型", "Qwen2.5 0.5B"),
-    stat("量化", "Q4F16"),
+    stat("運算引擎", profile.mode, isModelReady() ? "ok" : ""),
+    stat("量化", profile.quant),
+    stat("首次下載", profile.download),
     stat("模型紀錄", wasModelLoadedBefore() ? "曾下載／載入" : "尚未", wasModelLoadedBefore() ? "ok" : "warn"),
     stat("目前 RAM 狀態", isModelReady() ? "已載入" : "未載入", isModelReady() ? "ok" : "warn"),
-    stat("Model ID", MODEL_ID.replace("-Instruct-q4f16_1-MLC", "")),
   ].join("");
 }
 
 async function startModel() {
   els.loadModelBtn.disabled = true;
-  els.modeBadge.textContent = "AI 啟動中";
-  setProgress(0.01, "準備 WebLLM…");
+  els.modeBadge.textContent = preferredBackend() === "webgpu" ? "WebGPU 啟動中" : "CPU 模型啟動中";
+  setProgress(0.01, preferredBackend() === "webgpu" ? "準備 WebLLM…" : "準備 Transformers.js / WASM…");
   try {
-    await loadModel((report) => {
-      setProgress(report.progress ?? 0, report.text || "下載／編譯模型…");
-    });
+    await loadModel((report) => setProgress(report.progress ?? 0, report.text || "下載／載入模型…"));
     setProgress(1, "AI 已就緒");
-    els.modeBadge.textContent = "本機 AI 已啟動";
+    els.modeBadge.textContent = getBackendMode() === "webgpu" ? "WebGPU AI 已啟動" : "CPU/WASM AI 已啟動";
     els.modeBadge.classList.add("ok");
     els.chatInput.disabled = false;
     els.sendBtn.disabled = false;
@@ -93,31 +117,34 @@ async function sendChat(event) {
   try {
     const result = await chat(history, (output) => { reply.textContent = output || "…"; });
     history.push({ role: "assistant", content: result.output });
-    const first = result.firstTokenMs ? `首字 ${result.firstTokenMs}ms` : "首字未知";
-    els.perfText.textContent = `${first}｜總耗時 ${result.totalMs}ms${result.runtime ? `｜${result.runtime}` : ""}`;
+    const first = result.firstTokenMs ? `首字 ${result.firstTokenMs}ms｜` : "";
+    els.perfText.textContent = `${first}總耗時 ${result.totalMs}ms｜${result.runtime || getModelProfile().mode}`;
   } catch (error) {
     reply.textContent = `錯誤：${error?.message || error}`;
-  } finally { els.sendBtn.disabled = false; }
+  } finally {
+    els.sendBtn.disabled = false;
+  }
 }
 
 function setupInstallUI() {
-  if (isStandalone()) {
-    els.installHint.textContent = "已用 PWA 模式執行。首次啟動可直接下載本機 AI 模型。";
-  } else if (/iphone|ipad|ipod/i.test(navigator.userAgent)) {
-    els.installHint.textContent = "iPhone：Safari 分享 → 加入主畫面。安裝後開啟即可測試本機模型。";
-  } else {
-    els.installHint.textContent = "可安裝成 PWA。若瀏覽器支援，會顯示安裝按鈕。";
-  }
+  if (isStandalone()) els.installHint.textContent = "已用 PWA 模式執行。模型與程式更新分開管理。";
+  else if (/iphone|ipad|ipod/i.test(navigator.userAgent)) els.installHint.textContent = "iPhone：Safari 分享 → 加入主畫面。";
+  else els.installHint.textContent = "可安裝成 PWA；若瀏覽器支援，會顯示安裝按鈕。";
 }
 
 async function init() {
   els.versionLabel.textContent = `v${APP_VERSION}`;
   setupInstallUI();
+  configureEngineUI();
   await renderDeviceStats();
   renderAIStats();
 
   await setupPWA({
-    onUpdate: (reg) => { updateRegistration = reg; els.updateBtn.textContent = "立即更新"; els.updateStatus.textContent = `發現新版本｜目前 v${APP_VERSION}`; },
+    onUpdate: (reg) => {
+      updateRegistration = reg;
+      els.updateBtn.textContent = "立即更新";
+      els.updateStatus.textContent = `目前 v${APP_VERSION}｜新版已準備完成`;
+    },
     onInstallReady: () => els.installBtn.classList.remove("hidden"),
     onControllerChange: () => {
       if (!reloadingForUpdate) { reloadingForUpdate = true; location.reload(); }
@@ -125,28 +152,35 @@ async function init() {
   });
 
   const remoteVersion = await getRemoteVersion();
-  if (remoteVersion && remoteVersion !== APP_VERSION) els.updateBtn.classList.remove("hidden");
+  els.updateStatus.textContent = remoteVersion && remoteVersion !== APP_VERSION
+    ? `目前 v${APP_VERSION}｜最新 v${remoteVersion}`
+    : `目前 v${APP_VERSION}｜已是最新版`;
 
   els.loadModelBtn.addEventListener("click", startModel);
   els.unloadBtn.addEventListener("click", async () => {
     await unloadModel();
     els.loadModelBtn.disabled = false;
-    els.loadModelBtn.textContent = "重新啟動 AI";
     els.unloadBtn.disabled = true;
     els.chatInput.disabled = true;
     els.sendBtn.disabled = true;
-    els.modeBadge.textContent = "模型已卸載 RAM";
+    els.modeBadge.classList.remove("ok");
+    configureEngineUI();
     renderAIStats();
   });
+
   els.chatForm.addEventListener("submit", sendChat);
   els.clearChatBtn.addEventListener("click", () => {
     history.splice(1);
     els.messages.innerHTML = '<div class="message assistant">對話已清除。模型仍在手機本機執行。</div>';
   });
+
   els.updateBtn.addEventListener("click", async () => {
+    if (updateRegistration?.waiting) {
+      applyUpdate(updateRegistration);
+      return;
+    }
     els.updateBtn.disabled = true;
     els.updateBtn.textContent = "檢查中…";
-    els.updateStatus.textContent = `目前 v${APP_VERSION}｜正在檢查 GitHub 最新版本…`;
     const result = await checkForUpdate();
     if (result.waiting) {
       updateRegistration = result.registration;
@@ -156,23 +190,21 @@ async function init() {
       return;
     }
     if (result.hasUpdate) {
-      els.updateBtn.disabled = false;
+      els.updateStatus.textContent = `目前 v${APP_VERSION}｜最新 v${result.remoteVersion}，重新整理即可套用`;
       els.updateBtn.textContent = "重新整理更新";
-      els.updateStatus.textContent = `目前 v${APP_VERSION}｜最新 v${result.remoteVersion}`;
+      els.updateBtn.disabled = false;
+      updateRegistration = result.registration;
       return;
     }
     els.updateStatus.textContent = `目前 v${APP_VERSION}｜已是最新版`;
     els.updateBtn.textContent = "檢查更新";
     els.updateBtn.disabled = false;
   });
+
   els.installBtn.addEventListener("click", async () => {
     const ok = await promptInstall();
     if (ok) els.installBtn.classList.add("hidden");
   });
-
-  if (isStandalone() && wasModelLoadedBefore() && navigator.gpu) {
-    els.progressText.textContent = "偵測到曾載入模型，可按按鈕直接啟動快取模型。";
-  }
 }
 
 init();

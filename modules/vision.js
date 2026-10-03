@@ -43,7 +43,16 @@ async function instance(type){
   return instances[type];
 }
 
-export async function preloadVision(type){ await instance(type); return true; }\nexport function getVisionStatus(){ return Object.fromEntries(["face","hand","gesture","pose"].map(k=>[k,Boolean(instances[k])])); }\n\nexport async function analyzeVision(type, source){
+export async function preloadVision(type){
+  await instance(type);
+  return true;
+}
+
+export function getVisionStatus(){
+  return Object.fromEntries(["face","hand","gesture","pose"].map(k=>[k,Boolean(instances[k])]));
+}
+
+export async function analyzeVision(type, source){
   const m=await instance(type);
   const r= type==="gesture" ? m.recognize(source) : m.detect(source);
   if(type==="face") return {faces:r.faceLandmarks?.length||0,landmarks:r.faceLandmarks?.[0]?.length||0};

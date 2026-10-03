@@ -45,9 +45,9 @@ self.onmessage = async ({ data }) => {
     if (data.type === "generate") {
       const pipe = await loadGenerator();
       const result = await pipe(data.messages, {
-        max_new_tokens: 96,
+        max_new_tokens: data.options?.max_tokens ?? 96,
         do_sample: true,
-        temperature: 0.65,
+        temperature: data.options?.temperature ?? 0.65,
         top_p: 0.85,
         repetition_penalty: 1.08,
       });

@@ -232,7 +232,7 @@ export function isModelReady() {
   return Boolean(gpuEngine || (cpuWorker && backend === "wasm"));
 }
 
-async function chatCPU(messages, onToken) {
+async function chatCPU(messages, onToken, options = {}) {
   const started = performance.now();
   return new Promise((resolve, reject) => {
     cpuChat = {
@@ -247,16 +247,19 @@ async function chatCPU(messages, onToken) {
         });
       },
     };
-    cpuWorker.postMessage({ type: "generate", messages });
+    cpuWorker.postMessage({ type: "generate", messages, options });
   });
 }
 
-async function chatGPU(messages, onToken) {
+async function chatGPU(messages, onToken, options = {}) {
   const started = performance.now();
   let output = "";
   let firstTokenAt = null;
   const stream = await gpuEngine.chat.completions.create({
-    messages, stream: true, temperature: 0.65, max_tokens: 320,
+    messages,
+    stream: true,
+    temperature: options.temperature ?? 0.65,
+    max_tokens: options.max_tokens ?? 320,
   });
   for await (const chunk of stream) {
     const token = chunk.choices?.[0]?.delta?.content ?? "";
@@ -275,7 +278,9 @@ async function chatGPU(messages, onToken) {
   };
 }
 
-export async function chat(messages, onToken) {
+export async function chat(messages, onToken = () => {}, options = {}) {
   if (!isModelReady()) throw new Error("AI 尚未啟動");
-  return backend === "wasm" ? chatCPU(messages, onToken) : chatGPU(messages, onToken);
+  return backend === "wasm"
+    ? chatCPU(messages, onToken, options)
+    : chatGPU(messages, onToken, options);
 }

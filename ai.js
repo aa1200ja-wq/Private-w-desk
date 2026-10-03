@@ -117,6 +117,52 @@ export function getStorageLocation() {
   return "此 PWA 的 WebKit 網站資料 / Cache Storage";
 }
 
+function classifyCachedURL(rawUrl) {
+  let url = rawUrl;
+  try { url = decodeURIComponent(rawUrl); } catch (_) {}
+  if (url.includes("mlc-ai/Qwen2.5-0.5B-Instruct-q4f16_1-MLC")) return "gpu";
+  if (url.includes("onnx-community/Qwen2.5-0.5B-Instruct")) return "cpu";
+  return null;
+}
+
+export async function scanModelInventory() {
+  const inventory = {
+    gpu: { installed: false, caches: [], entries: 0 },
+    cpu: { installed: false, caches: [], entries: 0 },
+    duplicateCopies: [],
+    cacheNames: [],
+    packageCount: 0,
+  };
+
+  if (!("caches" in self)) return inventory;
+
+  const cacheNames = await caches.keys();
+  inventory.cacheNames = cacheNames;
+
+  const locations = { gpu: new Set(), cpu: new Set() };
+  for (const cacheName of cacheNames) {
+    const cache = await caches.open(cacheName);
+    const requests = await cache.keys();
+    for (const request of requests) {
+      const type = classifyCachedURL(request.url);
+      if (!type) continue;
+      inventory[type].installed = true;
+      inventory[type].entries += 1;
+      locations[type].add(cacheName);
+    }
+  }
+
+  for (const type of ["gpu", "cpu"]) {
+    inventory[type].caches = [...locations[type]];
+    if (inventory[type].caches.length > 1) {
+      inventory.duplicateCopies.push(type);
+    }
+  }
+
+  inventory.packageCount = Number(inventory.gpu.installed) + Number(inventory.cpu.installed);
+  return inventory;
+}
+
 export async function unloadModel() {
   if (gpuEngine) await gpuEngine.unload();
   if (gpuWorker) gpuWorker.terminate();

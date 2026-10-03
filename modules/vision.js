@@ -85,3 +85,13 @@ export function captureCamera(video,canvas){
   canvas.width=w; canvas.height=h; canvas.getContext("2d").drawImage(video,0,0,w,h);
   return new Promise(resolve=>canvas.toBlob(resolve,"image/jpeg",.9));
 }
+
+export function releaseVision(type){
+  const item=instances[type];
+  try{ item?.close?.(); }catch(_){}
+  delete instances[type];
+}
+
+export function releaseAllVision(){
+  for(const type of Object.keys(instances)) releaseVision(type);
+}

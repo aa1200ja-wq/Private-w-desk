@@ -27,7 +27,7 @@
       <div class="hero-copy">
         <span id="modeBadge" class="badge">偵測中</span>
         <h2>Qwen2.5 0.5B 本機大腦</h2>
-        <p>模型下載到這支裝置，在瀏覽器內透過 WebGPU 運算，不送到外部聊天 API。</p>
+        <p id="engineDescription">正在偵測這支手機適合使用 WebGPU 或 CPU/WASM。</p>
       </div>
       <div class="progress-wrap">
         <div class="progress-track"><div id="progressBar" class="progress-bar"></div></div>
@@ -56,7 +56,7 @@
         <button id="clearChatBtn" class="ghost">清除</button>
       </div>
       <div id="messages" class="messages" aria-live="polite">
-        <div class="message assistant">先按「下載／啟動 AI」。模型完成後即可在手機本機聊天。</div>
+        <div class="message assistant">按「下載／啟動 AI」。工作台會自動選擇這支手機可用的本機引擎。</div>
       </div>
       <form id="chatForm" class="composer">
         <textarea id="chatInput" rows="2" placeholder="輸入訊息…" disabled></textarea>
@@ -69,14 +69,15 @@
       <div>
         <p class="eyebrow">PWA</p>
         <h3>安裝與更新</h3>
-        <p id="installHint">正在檢查安裝狀態…</p>\n        <p id="updateStatus">目前版本：v0.1.1｜尚未檢查更新</p>
+        <p id="installHint">正在檢查安裝狀態…</p>
+        <p id="updateStatus">目前版本：v0.1.2｜尚未檢查更新</p>
       </div>
       <button id="installBtn" class="secondary hidden">安裝到手機</button>
     </section>
 
     <footer>
-      <span id="versionLabel">v0.1.1</span>
-      <span>GitHub Pages / WebGPU / WebLLM</span>
+      <span id="versionLabel">v0.1.2</span>
+      <span>GitHub Pages / WebGPU / WASM</span>
     </footer>
   </main>
   <script type="module" src="./app.js"></script>

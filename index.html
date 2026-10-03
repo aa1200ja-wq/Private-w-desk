@@ -1,0 +1,84 @@
+<!doctype html>
+<html lang="zh-Hant">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover" />
+  <meta name="theme-color" content="#0d1117" />
+  <meta name="apple-mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+  <meta name="apple-mobile-web-app-title" content="AI 工作台" />
+  <link rel="manifest" href="./manifest.webmanifest" />
+  <link rel="icon" href="./icon.svg" type="image/svg+xml" />
+  <link rel="apple-touch-icon" href="./icon.svg" />
+  <link rel="stylesheet" href="./styles.css" />
+  <title>Private W Desk</title>
+</head>
+<body>
+  <main class="app-shell">
+    <header class="topbar">
+      <div>
+        <p class="eyebrow">PRIVATE W DESK</p>
+        <h1>手機 AI 工作台</h1>
+      </div>
+      <button id="updateBtn" class="ghost hidden">更新</button>
+    </header>
+
+    <section class="hero card">
+      <div class="hero-copy">
+        <span id="modeBadge" class="badge">偵測中</span>
+        <h2>Qwen2.5 0.5B 本機大腦</h2>
+        <p>模型下載到這支裝置，在瀏覽器內透過 WebGPU 運算，不送到外部聊天 API。</p>
+      </div>
+      <div class="progress-wrap">
+        <div class="progress-track"><div id="progressBar" class="progress-bar"></div></div>
+        <div class="progress-row"><span id="progressText">尚未載入</span><span id="progressPct">0%</span></div>
+      </div>
+      <div class="actions">
+        <button id="loadModelBtn" class="primary">下載／啟動 AI</button>
+        <button id="unloadBtn" class="secondary" disabled>卸載記憶體</button>
+      </div>
+    </section>
+
+    <section class="grid">
+      <article class="card status-card">
+        <h3>裝置狀態</h3>
+        <dl id="deviceStats" class="stats"></dl>
+      </article>
+      <article class="card status-card">
+        <h3>AI 狀態</h3>
+        <dl id="aiStats" class="stats"></dl>
+      </article>
+    </section>
+
+    <section class="card chat-card">
+      <div class="section-title">
+        <div><p class="eyebrow">LOCAL CHAT</p><h3>本機聊天室</h3></div>
+        <button id="clearChatBtn" class="ghost">清除</button>
+      </div>
+      <div id="messages" class="messages" aria-live="polite">
+        <div class="message assistant">先按「下載／啟動 AI」。模型完成後即可在手機本機聊天。</div>
+      </div>
+      <form id="chatForm" class="composer">
+        <textarea id="chatInput" rows="2" placeholder="輸入訊息…" disabled></textarea>
+        <button id="sendBtn" class="primary" type="submit" disabled>送出</button>
+      </form>
+      <div class="perf" id="perfText">尚未執行推論</div>
+    </section>
+
+    <section class="card install-card">
+      <div>
+        <p class="eyebrow">PWA</p>
+        <h3>安裝與更新</h3>
+        <p id="installHint">正在檢查安裝狀態…</p>
+      </div>
+      <button id="installBtn" class="secondary hidden">安裝到手機</button>
+    </section>
+
+    <footer>
+      <span id="versionLabel">v0.1.0</span>
+      <span>GitHub Pages / WebGPU / WebLLM</span>
+    </footer>
+  </main>
+  <script type="module" src="./app.js"></script>
+</body>
+</html>

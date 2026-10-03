@@ -1,4 +1,4 @@
-const APP_VERSION = "0.1.0";
+const APP_VERSION = "0.1.1";
 const SHELL_CACHE = `pwd-shell-${APP_VERSION}`;
 const RUNTIME_CACHE = "pwd-runtime-v1";
 const APP_SHELL = [

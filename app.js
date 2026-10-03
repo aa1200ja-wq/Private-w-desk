@@ -1,7 +1,7 @@
 import {
   loadModel, unloadModel, isModelReady, chat,
   wasModelLoadedBefore, isModelInstalled, getStoredBackend, getStorageLocation,
-  preferredBackend, getBackendMode, getModelProfile
+  scanModelInventory, preferredBackend, getBackendMode, getModelProfile
 } from "./ai.js";
 import {
   APP_VERSION, setupPWA, promptInstall, applyUpdate,
@@ -11,8 +11,9 @@ import {
 const $ = (id) => document.getElementById(id);
 const els = Object.fromEntries([
   "updateBtn","modeBadge","engineDescription","progressBar","progressText","progressPct",
-  "loadModelBtn","unloadBtn","deviceStats","aiStats","messages","chatForm","chatInput",
-  "sendBtn","clearChatBtn","perfText","installHint","updateStatus","installBtn","versionLabel"
+  "loadModelBtn","unloadBtn","deviceStats","aiStats","modelScanBtn","modelScanNote",
+  "messages","chatForm","chatInput","sendBtn","clearChatBtn","perfText",
+  "installHint","updateStatus","installBtn","versionLabel"
 ].map(id => [id, $(id)]));
 
 const history = [{
@@ -21,6 +22,7 @@ const history = [{
 }];
 let updateRegistration = null;
 let reloadingForUpdate = false;
+let modelInventory = null;
 
 function setProgress(value, text) {
   const pct = Math.max(0, Math.min(100, Math.round((value ?? 0) * 100)));
@@ -80,16 +82,59 @@ function renderAIStats() {
   const installed = isModelInstalled();
   const ready = isModelReady();
   const storedBackend = getStoredBackend();
-  els.aiStats.innerHTML = [
+  const rows = [
     stat("模型", "Qwen2.5 0.5B"),
     stat("本機安裝狀態", installed ? "已下載到手機" : "尚未下載", installed ? "ok" : "warn"),
     stat("儲存位置", installed ? getStorageLocation() : "—"),
-    stat("模型容量", profile.download),
+    stat("目前模型容量", profile.download),
     stat("下載時使用引擎", storedBackend === "wasm" ? "CPU / WASM" : storedBackend === "webgpu" ? "WebGPU" : "尚未"),
     stat("目前運算引擎", profile.mode, ready ? "ok" : ""),
     stat("目前執行狀態", ready ? "已載入 RAM，可聊天" : installed ? "已下載，待啟動" : "未啟動", ready ? "ok" : "warn"),
     stat("量化", profile.quant),
-  ].join("");
+  ];
+
+  if (modelInventory) {
+    rows.push(
+      stat("GPU Q4F16 版", modelInventory.gpu.installed ? "已安裝" : "未發現", modelInventory.gpu.installed ? "ok" : ""),
+      stat("CPU/WASM Q8 版", modelInventory.cpu.installed ? "已安裝" : "未發現", modelInventory.cpu.installed ? "ok" : ""),
+      stat("已安裝模型版本", `${modelInventory.packageCount} 套`, modelInventory.packageCount > 1 ? "warn" : "ok"),
+      stat(
+        "重複／多模型檢查",
+        modelInventory.duplicateCopies.length
+          ? "發現同版本存在多個 Cache"
+          : modelInventory.packageCount > 1
+            ? "CPU＋GPU 並存（不同格式）"
+            : "未發現重複",
+        modelInventory.duplicateCopies.length ? "danger" : modelInventory.packageCount > 1 ? "warn" : "ok"
+      )
+    );
+  }
+
+  els.aiStats.innerHTML = rows.join("");
+}
+
+async function refreshModelInventory() {
+  els.modelScanBtn.disabled = true;
+  els.modelScanBtn.textContent = "掃描中…";
+  els.modelScanNote.textContent = "正在檢查 Cache Storage 裡的模型檔案…";
+  try {
+    modelInventory = await scanModelInventory();
+    renderAIStats();
+    if (modelInventory.packageCount === 0) {
+      els.modelScanNote.textContent = "沒有在 Cache Storage 偵測到已知模型。";
+    } else if (modelInventory.duplicateCopies.length) {
+      els.modelScanNote.textContent = "偵測到同一執行版本分散在多個 Cache；後續可清理。";
+    } else if (modelInventory.packageCount > 1) {
+      els.modelScanNote.textContent = "同時裝有 GPU 與 CPU 版；它們是同一基礎模型的不同執行格式，不算重複檔。";
+    } else {
+      els.modelScanNote.textContent = "目前只偵測到 1 套模型執行版本，沒有重複。";
+    }
+  } catch (error) {
+    els.modelScanNote.textContent = `掃描失敗：${error?.message || error}`;
+  } finally {
+    els.modelScanBtn.disabled = false;
+    els.modelScanBtn.textContent = "重新掃描本機模型";
+  }
 }
 
 async function startModel() {
@@ -105,7 +150,7 @@ async function startModel() {
     els.sendBtn.disabled = false;
     els.unloadBtn.disabled = false;
     els.loadModelBtn.textContent = "AI 已啟動";
-    renderAIStats();
+    await refreshModelInventory();
     await renderDeviceStats();
   } catch (error) {
     console.error(error);
@@ -148,6 +193,7 @@ async function init() {
   configureEngineUI();
   await renderDeviceStats();
   renderAIStats();
+  await refreshModelInventory();
 
   await setupPWA({
     onUpdate: (reg) => {
@@ -166,6 +212,7 @@ async function init() {
     ? `目前 v${APP_VERSION}｜最新 v${remoteVersion}`
     : `目前 v${APP_VERSION}｜已是最新版`;
 
+  els.modelScanBtn.addEventListener("click", refreshModelInventory);
   els.loadModelBtn.addEventListener("click", startModel);
   els.unloadBtn.addEventListener("click", async () => {
     await unloadModel();

@@ -1,11 +1,11 @@
 import { MODEL_ID, loadModel, unloadModel, isModelReady, chat, wasModelLoadedBefore } from "./ai.js";
-import { APP_VERSION, setupPWA, promptInstall, applyUpdate, isStandalone, getRemoteVersion } from "./pwa.js";
+import { APP_VERSION, setupPWA, promptInstall, applyUpdate, isStandalone, getRemoteVersion, checkForUpdate } from "./pwa.js";
 
 const $ = (id) => document.getElementById(id);
 const els = Object.fromEntries([
   "updateBtn","modeBadge","progressBar","progressText","progressPct","loadModelBtn","unloadBtn",
   "deviceStats","aiStats","messages","chatForm","chatInput","sendBtn","clearChatBtn","perfText",
-  "installHint","installBtn","versionLabel"
+  "installHint","updateStatus","installBtn","versionLabel"
 ].map(id => [id, $(id)]));
 
 const history = [{ role: "system", content: "你是手機內的本機 AI 助手。全程使用台灣繁體中文，回答精簡、直接。" }];
@@ -117,7 +117,7 @@ async function init() {
   renderAIStats();
 
   await setupPWA({
-    onUpdate: (reg) => { updateRegistration = reg; els.updateBtn.classList.remove("hidden"); },
+    onUpdate: (reg) => { updateRegistration = reg; els.updateBtn.textContent = "立即更新"; els.updateStatus.textContent = `發現新版本｜目前 v${APP_VERSION}`; },
     onInstallReady: () => els.installBtn.classList.remove("hidden"),
     onControllerChange: () => {
       if (!reloadingForUpdate) { reloadingForUpdate = true; location.reload(); }
@@ -143,9 +143,27 @@ async function init() {
     history.splice(1);
     els.messages.innerHTML = '<div class="message assistant">對話已清除。模型仍在手機本機執行。</div>';
   });
-  els.updateBtn.addEventListener("click", () => {
-    if (updateRegistration?.waiting) applyUpdate(updateRegistration);
-    else location.reload();
+  els.updateBtn.addEventListener("click", async () => {
+    els.updateBtn.disabled = true;
+    els.updateBtn.textContent = "檢查中…";
+    els.updateStatus.textContent = `目前 v${APP_VERSION}｜正在檢查 GitHub 最新版本…`;
+    const result = await checkForUpdate();
+    if (result.waiting) {
+      updateRegistration = result.registration;
+      els.updateBtn.disabled = false;
+      els.updateBtn.textContent = "立即更新";
+      els.updateStatus.textContent = `目前 v${APP_VERSION}｜新版已準備完成`;
+      return;
+    }
+    if (result.hasUpdate) {
+      els.updateBtn.disabled = false;
+      els.updateBtn.textContent = "重新整理更新";
+      els.updateStatus.textContent = `目前 v${APP_VERSION}｜最新 v${result.remoteVersion}`;
+      return;
+    }
+    els.updateStatus.textContent = `目前 v${APP_VERSION}｜已是最新版`;
+    els.updateBtn.textContent = "檢查更新";
+    els.updateBtn.disabled = false;
   });
   els.installBtn.addEventListener("click", async () => {
     const ok = await promptInstall();

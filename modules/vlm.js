@@ -18,4 +18,5 @@ export function analyzeImage(blob,prompt,onStatus){
   if(!navigator.gpu) return Promise.reject(new Error("SmolVLM 此版需要 WebGPU"));
   ensure(onStatus);return new Promise((resolve,reject)=>{pending={resolve,reject};worker.postMessage({type:"analyze",blob,prompt});});
 }
-export function isVLMReady(){return ready;}\nexport function unloadVLM(){worker?.terminate();worker=null;pending=null;ready=false;}
+export function isVLMReady(){return ready;}
+export function unloadVLM(){worker?.terminate();worker=null;pending=null;ready=false;}

@@ -69,5 +69,6 @@ footer { display: flex; justify-content: space-between; gap: 12px; color: #6f7d8
 @media (max-width: 460px) { .actions { grid-template-columns: 1fr; } .install-card { align-items: flex-start; flex-direction: column; } .install-card button { width: 100%; } }
 
 .model-tools { margin-top: 14px; padding-top: 14px; border-top: 1px solid rgba(255,255,255,.06); }
-.model-tools button { width: 100%; }
+.model-tools button { width: 100%; margin-top: 8px; }
+.model-tools button:first-child { margin-top: 0; }
 .model-note { margin: 9px 0 0; color: var(--muted); font-size: 12px; line-height: 1.5; }
